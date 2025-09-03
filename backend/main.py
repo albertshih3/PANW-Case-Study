@@ -99,6 +99,13 @@ async def create_journal(payload: JournalCreate, clerk_user_id: str = Depends(ge
         return items[0]
     raise HTTPException(status_code=500, detail="Failed to load created journal entry")
 
+
+@app.get("/conversations")
+async def list_conversations(clerk_user_id: str = Depends(get_current_user_id), limit: int = 50):
+    memory_service.ensure_user(clerk_user_id)
+    items = memory_service.list_conversations(clerk_user_id, limit=limit)
+    return items
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

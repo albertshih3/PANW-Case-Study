@@ -27,7 +27,7 @@ async def _get_jwks() -> Dict[str, Any]:
     global _jwks_cache, _jwks_last_fetch
     now = time.time()
     if _jwks_cache and now - _jwks_last_fetch < _jwks_ttl_seconds:
-    return _jwks_cache  # type: ignore[return-value]
+        return _jwks_cache  # type: ignore[return-value]
     _, jwks_url = _get_issuer_and_jwks()
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.get(jwks_url)

@@ -17,13 +17,16 @@ interface Message {
 function App() {
   const { getToken, userId } = useAuth()
   const [messages, setMessages] = useState<Message[]>([])
+  const [journal, setJournal] = useState<Array<{id:number; title:string|null; content:string; created_at:string}>>([])
   const [inputText, setInputText] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const apiBase = useMemo(() => import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000', [])
+  const jwtTemplate = useMemo(() => (import.meta.env.VITE_CLERK_JWT_TEMPLATE as string | undefined) || 'default', [])
 
   useEffect(() => {
     // Clear chat when user changes
     setMessages([])
+  setJournal([])
   }, [userId])
 
   // Placeholder to demonstrate journal API wiring; future: manage in state and render list
@@ -31,13 +34,42 @@ function App() {
     let ignore = false
     const load = async () => {
       if (!userId) return
-      const token = await getToken?.({ template: 'default' })
       try {
-        await fetch(`${apiBase}/journal`, {
+        let token: string | null | undefined = null
+        try {
+          // Try to get a JWT using configured template (default: "default").
+          token = await getToken?.({ template: jwtTemplate })
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn(`Clerk getToken failed for template "${jwtTemplate}". Check your Clerk JWT template configuration.`, e)
+        }
+        // Load journal entries (best-effort)
+        const jRes = await fetch(`${apiBase}/journal`, {
           headers: {
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
         })
+        if (jRes.ok) {
+          const jItems = await jRes.json()
+          if (!ignore) setJournal(jItems)
+        }
+
+        // Load recent conversations and render into chat
+        const cRes = await fetch(`${apiBase}/conversations?limit=50`, {
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        })
+        if (cRes.ok) {
+          const cItems: Array<{id:number; user_message:string; ai_response:string; timestamp:string}> = await cRes.json()
+          const ordered = cItems.sort((a,b)=> new Date(a.timestamp).getTime()-new Date(b.timestamp).getTime())
+          const restored: Message[] = []
+          for (const item of ordered) {
+            restored.push({ id: `${item.id}-u`, text: item.user_message, sender: 'user', timestamp: new Date(item.timestamp) })
+            restored.push({ id: `${item.id}-a`, text: item.ai_response, sender: 'ai', timestamp: new Date(item.timestamp) })
+          }
+          if (!ignore) setMessages(restored)
+        }
       } catch (e) {
         // eslint-disable-next-line no-console
         console.warn('Failed to fetch journal list', e)
@@ -45,7 +77,7 @@ function App() {
     }
     if (!ignore) load()
     return () => { ignore = true }
-  }, [userId, getToken, apiBase])
+  }, [userId, getToken, apiBase, jwtTemplate])
 
   const handleSendMessage = async () => {
     if (!inputText.trim()) return
@@ -62,7 +94,13 @@ function App() {
     setIsLoading(true)
 
     try {
-      const token = await getToken?.({ template: 'default' })
+      let token: string | null | undefined = null
+      try {
+        token = await getToken?.({ template: jwtTemplate })
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn(`Clerk getToken failed for template "${jwtTemplate}". Check your Clerk JWT template configuration.`, e)
+      }
       const response = await fetch(`${apiBase}/chat`, {
         method: 'POST',
         headers: {
@@ -185,7 +223,19 @@ function App() {
                 <CardTitle className="text-lg">Your Journal</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-sm text-muted-foreground">No entries yet. Your reflections will appear here.</div>
+                {journal.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No entries yet. Your reflections will appear here.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {journal.slice(0,8).map(j => (
+                      <div key={j.id} className="rounded border p-2">
+                        <div className="text-xs opacity-70">{new Date(j.created_at).toLocaleString()}</div>
+                        <div className="text-sm font-medium">{j.title || 'Untitled'}</div>
+                        <div className="text-sm line-clamp-2 opacity-80">{j.content}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

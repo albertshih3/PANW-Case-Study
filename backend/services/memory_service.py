@@ -67,6 +67,22 @@ class MemoryService:
             """)
             
             conn.commit()
+            # Lightweight schema migration for existing DBs where conversations may lack clerk_user_id
+            try:
+                cursor.execute(
+                    """
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'conversations' AND column_name = 'clerk_user_id'
+                    """
+                )
+                has_clerk_column = cursor.fetchone() is not None
+                if not has_clerk_column:
+                    cursor.execute("ALTER TABLE conversations ADD COLUMN clerk_user_id TEXT")
+                    print("✓ Added missing column conversations.clerk_user_id")
+                    conn.commit()
+            except Exception as mig_e:
+                # Non-fatal; storage can still proceed without clerk_user_id, but features will be limited
+                print(f"Warning: Schema migration check failed: {mig_e}")
             cursor.close()
             conn.close()
             print("✓ Memory database initialized")
@@ -217,4 +233,26 @@ class MemoryService:
             return rows
         except Exception as e:
             print(f"Error listing journal entries: {e}")
+            return []
+
+    def list_conversations(self, clerk_user_id: str, limit: int = 20):
+        try:
+            conn = self._connect()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute(
+                """
+                SELECT id, user_message, ai_response, timestamp
+                FROM conversations
+                WHERE clerk_user_id = %s
+                ORDER BY timestamp DESC
+                LIMIT %s
+                """,
+                (clerk_user_id, limit),
+            )
+            rows = cursor.fetchall()
+            cursor.close()
+            conn.close()
+            return rows
+        except Exception as e:
+            print(f"Error listing conversations: {e}")
             return []
