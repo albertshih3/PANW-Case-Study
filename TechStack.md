@@ -96,6 +96,7 @@
 - **Backend + AI Orchestration:** Fly.io or Render (simple full-stack apps)  
 - **Scaling:** Kubernetes + Docker on GCP/AWS  
 - **Database:** Supabase (Postgres + Auth + Storage in one)
+- **App name:** Loom (Weaving conversations into meaningful reflection)
 
 ---
 

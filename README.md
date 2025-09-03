@@ -1,69 +1,30 @@
-# React + TypeScript + Vite
+# Loom – weaving conversations into meaningful reflection
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Private journaling with an empathetic AI companion. Clerk handles auth, FastAPI powers the backend, and PostgreSQL + pgvector store memories and journal entries.
 
-Currently, two official plugins are available:
+## Setup
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+Backend (Python 3.9+)
+- Create a .env at repo root with at least:
+  - ANTHROPIC_API_KEY=...
+  - DATABASE_URL=postgresql://user:pass@localhost:5432/journaling_app
+  - OPENAI_API_KEY=...  # optional (enables embeddings/memory)
+  - CLERK_ISSUER=https://YOUR_SUBDOMAIN.clerk.accounts.dev
+    or CLERK_JWKS_URL=https://YOUR_SUBDOMAIN.clerk.accounts.dev/.well-known/jwks.json
+- Optionally also create backend/.env; both are loaded.
+- Install deps and run:
+  - pip install -r backend/requirements.txt
+  - python backend/start.py
 
-## Expanding the ESLint configuration
+Frontend (Node 18+)
+- Create .env.local with:
+  - VITE_CLERK_PUBLISHABLE_KEY=pk_test_...
+  - VITE_API_BASE_URL=http://localhost:8000
+- Install and run:
+  - npm i
+  - npm run dev
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      ...tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      ...tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      ...tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
-
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+## Notes
+- Auth: Frontend obtains a Clerk JWT; backend verifies via JWKS and associates data by clerk_user_id.
+- Database: tables users, conversations (with optional embeddings), and journal_entries are created automatically.
+- UI: Modern hero + chat card and a journal panel; more to come.
