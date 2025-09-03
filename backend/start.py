@@ -34,9 +34,7 @@ def check_environment():
         print("Please create a .env file based on .env.example")
         return False
     
-    # Check optional but recommended vars
-    if not os.getenv("OPENAI_API_KEY"):
-        print("⚠ OPENAI_API_KEY not set - memory features will be limited")
+    # Claude-first app: OpenAI is not used
     
     print("✓ Environment variables configured")
     return True

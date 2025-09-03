@@ -9,7 +9,7 @@ This guide will help you get the AI journaling companion up and running locally.
 3. **PostgreSQL** (v12 or later) with pgvector extension
 4. **API Keys**:
    - Anthropic API key (for Claude)
-   - OpenAI API key (for embeddings)
+   - Anthropic API key (Claude)
 
 ## Installation Steps
 
@@ -70,7 +70,7 @@ Edit `backend/.env` with your configuration:
 ```env
 # AI Service API Keys
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
-OPENAI_API_KEY=your_openai_api_key_here
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
 
 # Database Configuration  
 DATABASE_URL=postgresql://username:password@localhost:5432/journaling_app
@@ -111,7 +111,7 @@ Once the backend is running, visit http://localhost:8000/docs for interactive AP
 - **Backend**: FastAPI + LangChain
 - **AI**: Claude 4 Sonnet (via Anthropic API)  
 - **Memory**: pgvector for semantic search of conversation history
-- **Embeddings**: OpenAI embeddings for vector storage
+- **Embeddings**: Local lexical similarity (no external embeddings)
 
 ## Troubleshooting
 

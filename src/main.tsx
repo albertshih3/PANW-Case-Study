@@ -8,7 +8,6 @@ const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY as string
 
 if (!clerkPublishableKey) {
   // Soft warn in dev; app still renders so developer can see the message
-  // eslint-disable-next-line no-console
   console.warn('VITE_CLERK_PUBLISHABLE_KEY is not set. Auth UI will not function.');
 }
 

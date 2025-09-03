@@ -5,19 +5,16 @@ from datetime import datetime
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from pgvector.psycopg2 import register_vector
-import openai
 import numpy as np
 
 class MemoryService:
     def __init__(self):
-        self.database_url = os.getenv("DATABASE_URL", "postgresql://localhost/journaling_app")
-        # Initialize OpenAI client only if API key is present
-        api_key = os.getenv("OPENAI_API_KEY")
-        if api_key:
-            self.openai_client = openai.OpenAI(api_key=api_key)
-        else:
-            self.openai_client = None
-            print("⚠ OPENAI_API_KEY not set - disabling memory embeddings")
+        # Use Supabase database URL directly
+        self.database_url = os.getenv("DATABASE_URL")
+        if not self.database_url:
+            raise ValueError("DATABASE_URL environment variable is required")
+        # Claude-first app: remove OpenAI usage; memory retrieval will use lexical similarity
+        print("✓ MemoryService initialized (Claude-first, no OpenAI)")
         self._initialize_database()
 
     def _connect(self):
@@ -93,18 +90,8 @@ class MemoryService:
     
     async def store_conversation(self, clerk_user_id: str, user_message: str, ai_response: str):
         try:
+            # No embeddings; store message and response only (embedding remains NULL)
             embedding = None
-            # Generate embedding for the user message (if OpenAI is configured)
-            client = getattr(self, "openai_client", None)
-            if client is not None:
-                embedding_response = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: client.embeddings.create(
-                        input=user_message,
-                        model="text-embedding-ada-002"
-                    )
-                )
-                embedding = embedding_response.data[0].embedding
             
             # Store in database
             conn = self._connect()
@@ -127,48 +114,57 @@ class MemoryService:
     
     async def get_relevant_memories(self, clerk_user_id: str, query: str, limit: int = 3) -> List[str]:
         try:
-            # If no embeddings capability, skip retrieval and return empty context
-            client = getattr(self, "openai_client", None)
-            if client is None:
-                return []
-
-            # Generate embedding for the query
-            embedding_response = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: client.embeddings.create(
-                    input=query,
-                    model="text-embedding-ada-002"
-                )
-            )
-            
-            query_embedding = embedding_response.data[0].embedding
-            
-            # Search for similar conversations
+            # Lexical similarity (cosine on bag-of-words) over recent conversations
             conn = self._connect()
             cursor = conn.cursor(cursor_factory=RealDictCursor)
-            
             cursor.execute(
                 """
-                SELECT user_message, ai_response, timestamp,
-                       embedding <=> %s as distance
+                SELECT id, user_message, ai_response, timestamp
                 FROM conversations
-                WHERE embedding IS NOT NULL AND clerk_user_id = %s
-                ORDER BY distance
-                LIMIT %s
+                WHERE clerk_user_id = %s
+                ORDER BY timestamp DESC
+                LIMIT 200
                 """,
-                (query_embedding, clerk_user_id, limit),
+                (clerk_user_id,),
             )
-            
-            results = cursor.fetchall()
+            rows = cursor.fetchall() or []
             cursor.close()
             conn.close()
-            
-            memories = []
-            for row in results:
-                memory = f"Previous entry: {row['user_message']}"
-                memories.append(memory)
-            
-            return memories
+
+            def tokenize(t: str) -> List[str]:
+                return [w for w in ''.join([c.lower() if c.isalnum() else ' ' for c in t]).split() if w]
+
+            q_tokens = tokenize(query or "")
+            if not q_tokens:
+                return []
+
+            vocab: Dict[str, int] = {}
+            for w in q_tokens:
+                if w not in vocab:
+                    vocab[w] = len(vocab)
+
+            def vec(tokens: List[str]) -> np.ndarray:
+                v = np.zeros(len(vocab), dtype=float)
+                for w in tokens:
+                    idx = vocab.get(w)
+                    if idx is not None:
+                        v[idx] += 1.0
+                n = np.linalg.norm(v)
+                return v / n if n > 0 else v
+
+            q_vec = vec(q_tokens)
+
+            scored: List[Dict[str, Any]] = []
+            for row in rows:
+                d_tokens = tokenize(row.get("user_message") or "")
+                d_vec = vec(d_tokens)
+                sim = float(np.dot(q_vec, d_vec)) if q_vec.size and d_vec.size else 0.0
+                if sim > 0:
+                    scored.append({"row": row, "sim": sim})
+
+            scored.sort(key=lambda x: x["sim"], reverse=True)
+            top = scored[:limit]
+            return [f"Previous entry: {it['row']['user_message']}" for it in top]
             
         except Exception as e:
             print(f"Error retrieving memories: {e}")

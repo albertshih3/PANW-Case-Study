@@ -1,46 +1,25 @@
 import os
 import psycopg2
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+from urllib.parse import urlparse
+from dotenv import load_dotenv
 
 def create_database_and_extension():
     """Initialize PostgreSQL database with pgvector extension"""
     
+    # Load environment variables from .env file
+    load_dotenv()
+    
     db_url = os.getenv("DATABASE_URL", "postgresql://localhost/journaling_app")
     
-    # Parse database URL
-    if db_url.startswith("postgresql://"):
-        parts = db_url.replace("postgresql://", "").split("/")
-        if len(parts) == 2:
-            host_info, db_name = parts
-            if "@" in host_info:
-                user_pass, host_port = host_info.split("@")
-                if ":" in user_pass:
-                    username, password = user_pass.split(":")
-                else:
-                    username = user_pass
-                    password = ""
-            else:
-                host_port = host_info
-                username = "postgres"
-                password = ""
-            
-            if ":" in host_port:
-                host, port = host_port.split(":")
-            else:
-                host = host_port
-                port = "5432"
-        else:
-            host = "localhost"
-            port = "5432"
-            username = "postgres"
-            password = ""
-            db_name = "journaling_app"
-    else:
-        host = "localhost"
-        port = "5432"
-        username = "postgres"
-        password = ""
-        db_name = "journaling_app"
+    # Parse database URL using urlparse to handle query parameters
+    parsed = urlparse(db_url)
+    
+    host = parsed.hostname or "localhost"
+    port = str(parsed.port) if parsed.port else "5432"
+    username = parsed.username or "postgres"
+    password = parsed.password or ""
+    db_name = parsed.path.lstrip('/') or "journaling_app"
     
     try:
         # Connect to default postgres database first
@@ -49,7 +28,8 @@ def create_database_and_extension():
             port=port,
             user=username,
             password=password,
-            database="postgres"
+            database="postgres",
+            sslmode="require"
         )
         conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         
@@ -73,7 +53,8 @@ def create_database_and_extension():
             port=port,
             user=username,
             password=password,
-            database=db_name
+            database=db_name,
+            sslmode="require"
         )
         conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         

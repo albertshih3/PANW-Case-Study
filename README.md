@@ -8,7 +8,7 @@ Backend (Python 3.9+)
 - Create a .env at repo root with at least:
   - ANTHROPIC_API_KEY=...
   - DATABASE_URL=postgresql://user:pass@localhost:5432/journaling_app
-  - OPENAI_API_KEY=...  # optional (enables embeddings/memory)
+  - ANTHROPIC_API_KEY=...  # required (Claude)
   - CLERK_ISSUER=https://YOUR_SUBDOMAIN.clerk.accounts.dev
     or CLERK_JWKS_URL=https://YOUR_SUBDOMAIN.clerk.accounts.dev/.well-known/jwks.json
 - Optionally also create backend/.env; both are loaded.
