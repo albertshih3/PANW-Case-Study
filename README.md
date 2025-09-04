@@ -1,6 +1,51 @@
 # Loom – weaving conversations into meaningful reflection
 
+Demo Video: https://youtu.be/aczQI2OvxwY
+Try it out: https://loomjournal.albertshih.org
+
 Private journaling with an empathetic AI companion. Clerk handles auth, FastAPI powers the backend, and PostgreSQL + pgvector store memories and journal entries.
+
+## Design & Tech Overview
+
+### Problem we’re solving
+- People want the benefits of journaling but face “blank page” anxiety and struggle to see patterns across entries.
+- Traditional journals become event logs rather than tools for growth and reflection.
+
+### Solution concept: Conversational journaling with Keo
+- Chat-first journaling that feels like texting a supportive companion; each chat is a journal entry.
+- Empathetic, concise prompts: one gentle follow-up at a time to keep momentum without overwhelm.
+- Memory and continuity: retrieve relevant past entries (via vector search) to personalize and maintain context.
+- Insights: sentiment and themes surfaced in dashboards and periodic summaries (weekly/monthly) to help connect dots.
+
+### Key design choices
+- Privacy-first: data and embeddings stay in your Postgres (e.g., Supabase) with pgvector.
+- Guardrails: non-clinical tone, clear crisis protocol, and basic PII scrubbing before prompts.
+- Streaming UX: token streaming for natural, “typing” responses.
+- Maintainable stack: React + FastAPI, typed contracts, minimal dependencies.
+
+### Technical stack (languages, libraries, AI models)
+- Frontend
+  - React + TypeScript (Vite)
+  - Tailwind CSS + lightweight UI primitives (shadcn-style components)
+  - Clerk for auth (JWT) integrated with backend via JWKS
+
+- Backend
+  - Python (FastAPI), httpx for AI calls
+  - PostgreSQL + pgvector for conversational memory; SQLAlchemy ORM
+  - Supabase (managed Postgres), psycopg2, pydantic, cryptography utils
+
+- AI layer
+  - Model: Anthropic Claude 3.5 Sonnet (Messages API; streaming and non-streaming)
+  - Embeddings/memory: similarity search over pgvector; short-term context lives in prompt
+  - Safety: empathetic system prompt, crisis escalation protocol, PII pattern masking
+
+### Potential future enhancements
+- Voice journaling (speech-to-text and optional text-to-speech)
+- On-device/private inference with smaller local models for sensitive sessions
+- Deeper insights: topic clustering, correlations (e.g., mood vs. activities), richer timelines
+- Multimodal entries (photos/sketches) with private/local analysis options
+- Proactive check-ins and digest emails for weekly/monthly reflections
+- Advanced moderation/guardrails (e.g., Llama Guard, custom policies)
 
 ## Phase 1 updates
 
@@ -18,13 +63,6 @@ Private journaling with an empathetic AI companion. Clerk handles auth, FastAPI 
 - GET /insights/trends, GET /insights/dashboard
 - GET /insights/summary?period=week|month
 - GET /user/goals, PUT /user/goals
-- GET /export (add ?download=true to prompt a file download)
-
-### Privacy
-
-- No embeddings are sent to third parties; trend analysis uses lexical/keyword heuristics locally.
-- Conversations and journals are stored in your own Postgres (Supabase) database.
-- You can export all your data at any time from the app (Export Data button) or via GET /export.
 
 ## Setup
 
@@ -48,11 +86,6 @@ Frontend (Node 18+)
 - Install and run:
   - npm i
   - npm run dev
-
-## Notes
-- Auth: Frontend obtains a Clerk JWT; backend verifies via JWKS and associates data by clerk_user_id.
-- Database: tables users, conversations (with optional embeddings), and journal_entries are created automatically.
-- UI: Modern hero + chat card and a journal panel; more to come.
 
 ## Clerk configuration
 
