@@ -91,9 +91,9 @@ class VectorInsightsService:
             with self._connect() as conn, conn.cursor(cursor_factory=RealDictCursor) as cursor:
                 cursor.execute(
                     """
-                    SELECT id, user_message, ai_response, timestamp
-                    FROM conversations WHERE clerk_user_id = %s AND id != %s
-                    ORDER BY timestamp DESC LIMIT %s
+                    SELECT id, content, created_at
+                    FROM journal_entries WHERE clerk_user_id = %s AND id != %s
+                    ORDER BY created_at DESC LIMIT %s
                     """,
                     (user_id, exclude_id, candidate_pool),
                 )
@@ -107,7 +107,7 @@ class VectorInsightsService:
                 return re.findall(r'\b\w+\b', text.lower())
 
             query_tokens = tokenize(content)
-            doc_tokens_list = [tokenize(doc.get("user_message", "")) for doc in docs]
+            doc_tokens_list = [tokenize(doc.get("content", "")) for doc in docs]
             
             all_tokens = set(query_tokens)
             for tokens in doc_tokens_list:
@@ -144,9 +144,8 @@ class VectorInsightsService:
             scores = [float(np.dot(query_vec, doc_vec)) for doc_vec in doc_vectors]
             
             scored_docs = [{
-                "content": doc.get("user_message", ""),
-                "response": doc.get("ai_response", ""),
-                "date": doc.get("timestamp"),
+                "content": doc.get("content", ""),
+                "date": doc.get("created_at"),
                 "similarity": score
             } for doc, score in zip(docs, scores)]
 
@@ -403,8 +402,11 @@ Focus on being supportive and constructive. Identify meaningful patterns without
 
     def _create_fallback_analysis(self, content: str) -> Dict[str, Any]:
         """Creates a safe, generic analysis object in case of errors."""
+        def quick_summary(text: str) -> str:
+            t = (text or "").strip().replace("\n", " ")
+            return (t[:140] + "…") if len(t) > 140 else (t or "Journal entry analyzed.")
         return {
-            "summary": self._generate_summary(content, [], []),
+            "summary": quick_summary(content),
             "emotions": [{"emotion": "reflective", "intensity": 0.7, "description": "Engaging in self-reflection."}],
             "themes": [{"theme": "Personal Reflection", "relevance": 0.8, "description": "General life reflection."}],
             "sentiment_score": 0.5,

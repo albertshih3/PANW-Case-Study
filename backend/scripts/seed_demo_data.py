@@ -36,18 +36,6 @@ def ensure_schema(cur):
     )
     cur.execute(
         """
-        CREATE TABLE IF NOT EXISTS conversations (
-          id SERIAL PRIMARY KEY,
-          clerk_user_id TEXT NOT NULL,
-          user_message TEXT NOT NULL,
-          ai_response TEXT NOT NULL,
-          embedding VECTOR(1536),
-          timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """
-    )
-    cur.execute(
-        """
         CREATE TABLE IF NOT EXISTS journal_entries (
           id SERIAL PRIMARY KEY,
           clerk_user_id TEXT NOT NULL,
@@ -81,7 +69,7 @@ def seed_user(conn):
         (USER_ID,),
     )
     # Clean old data
-    cur.execute("DELETE FROM conversations WHERE clerk_user_id = %s", (USER_ID,))
+    # Conversations are not retained
     cur.execute("DELETE FROM journal_entries WHERE clerk_user_id = %s", (USER_ID,))
     cur.execute("DELETE FROM user_goals WHERE clerk_user_id = %s", (USER_ID,))
 
@@ -164,32 +152,7 @@ def seed_user(conn):
     insert_entry(d, time(8, 0), "Morning reflections - dual entry test", "Short note: gratitude for coffee and quiet time. Light exercise planned. Keywords: gratitude, coffee, quiet, exercise.")
     insert_entry(d, time(20, 30), "Evening wrap-up - dual entry test", "Evening check-in: a bit of stress, managed with a walk and deep breathing. Keywords: stress, walk, breathing.")
 
-    # Conversations
-    def conv(ts_days_ago: int, user: str, ai: str):
-        cur.execute(
-            """
-            INSERT INTO conversations (clerk_user_id, user_message, ai_response, embedding, timestamp)
-            VALUES (%s, %s, %s, %s, %s)
-            """,
-            (USER_ID, user, ai, None, datetime.now() - timedelta(days=ts_days_ago)),
-        )
-
-    conv(8, "I felt overwhelmed by a deadline at work today but a short break and breathing helped.",
-         "It's great you paused and breathed. What made the deadline feel overwhelming, and what small boundary could help next time?")
-    conv(6, "Slept poorly midweek and noticed more anxiety.",
-         "Noticing that pattern is powerful. Would a consistent wind-down routine be worth trying tonight?")
-    conv(5, "Went for a long run and felt proud.",
-         "Lovely. What did the run shift in your mood, and how might you keep that momentum?")
-    conv(3, "Had a joyful dinner with friends—lots of laughter.",
-         "Connection can recharge us. What stood out about being with friends?")
-    conv(2, "Started reading before bed and sleep improved.",
-         "Great experiment. What cues remind you to start your wind-down routine?")
-    conv(1, "Today I felt calm and focused after a morning stretch.",
-         "Nice start. How did that calm show up later in your day?")
-    conv(9, "Family brunch on Sunday brought gratitude.",
-         "That sounds nourishing. What made it feel meaningful this week?")
-    conv(12, "A difficult conversation at work—but I stayed present.",
-         "That took courage. What did staying present change about the outcome?")
+    # Conversations removed from seed data
 
     conn.commit()
     cur.close()
