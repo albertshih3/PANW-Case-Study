@@ -72,8 +72,8 @@ export function KeoIntro({ name, onSubmit }: KeoIntroProps) {
               </span>
             </h1>
             <p data-description className="mt-3 text-base sm:text-lg text-slate-600 dark:text-slate-300" style={{ opacity: 0, transform: 'translateY(8px)' }}>
-              I'm Keo, your AI journaling companion. I'll help you explore your thoughts through natural conversation, 
-              analyze patterns in your emotions, and provide personalized insights to support your mental wellness journey.
+              I'm Keo, your AI journaling companion. Write freely in a continuous journal entry, and I'll provide thoughtful 
+              guidance to deepen your reflection. No chat bubbles - just you, your thoughts, and gentle AI prompts when you need them.
             </p>
           </div>
 
@@ -85,13 +85,16 @@ export function KeoIntro({ name, onSubmit }: KeoIntroProps) {
               <Textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder="Share what's on your mind and I'll guide you through a thoughtful conversation..."
-                rows={3}
+                placeholder="Begin writing about whatever is on your mind. You can write continuously, and I'll offer gentle guidance along the way to help you explore your thoughts more deeply..."
+                rows={4}
                 className="w-full max-w-xl text-base"
               />
               <div className="flex items-center gap-2">
-                <Button onClick={handleSubmit} disabled={!text.trim()}>Start Journal</Button>
+                <Button onClick={handleSubmit} disabled={!text.trim()}>Begin Journal Entry</Button>
               </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 text-center max-w-md">
+                💡 Write as much or as little as you want. Use Ctrl+Enter while writing to get AI guidance that helps deepen your reflection.
+              </p>
             </div>
           </div>
         </div>

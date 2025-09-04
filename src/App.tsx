@@ -13,32 +13,27 @@ import { Calendar, Sparkles, Target, X, BarChart3 } from 'lucide-react'
 import { Tooltip } from '@/components/ui/tooltip'
 import { GuidedTour, type TourStep } from '@/components/GuidedTour'
 
-interface Message {
-  id: string
-  text: string
-  sender: 'user' | 'ai'
-  timestamp: Date
-}
+// Removed Message interface as we no longer use chat messages
+// Instead we use currentPrompt (string) and journalText (string)
 
 // Removed a corrupted/unused FadeUpText component
 
 function App() {
   const { getToken, userId } = useAuth()
   const { user } = useUser()
-  const [currentMessage, setCurrentMessage] = useState<Message | null>(null)
+  const [currentPrompt, setCurrentPrompt] = useState<string>('')
   const [journal, setJournal] = useState<Array<{id:number; title:string|null; content:string; created_at:string; updated_at?: string}>>([])
   const [journalTotal, setJournalTotal] = useState<number>(0)
   const [journalPage, setJournalPage] = useState<number>(0)
   const PAGE_SIZE = 10
-  const [inputText, setInputText] = useState('')
+  const [journalText, setJournalText] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [isSending, setIsSending] = useState(false)
-  const [isStreaming, setIsStreaming] = useState(false)
   const [initialLoaded, setInitialLoaded] = useState(false)
   const [isJournaling, setIsJournaling] = useState(false)
-  const [conversationHistory, setConversationHistory] = useState<Message[]>([])
+  const [currentJournalId, setCurrentJournalId] = useState<number | null>(null)
   const [scope, animate] = useAnimate()
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const journalTextareaRef = useRef<HTMLTextAreaElement>(null)
   const [selectedEntry, setSelectedEntry] = useState<{id: number; title: string; date: string} | null>(null)
   const [goals, setGoals] = useState<string[]>([])
   const [newGoal, setNewGoal] = useState('')
@@ -52,9 +47,10 @@ function App() {
   const jwtTemplate = useMemo(() => (import.meta.env.VITE_CLERK_JWT_TEMPLATE as string | undefined) || 'default', [])
 
   useEffect(() => {
-    // Clear chat when user changes
-    setCurrentMessage(null)
-    setConversationHistory([])
+    // Clear journal state when user changes
+    setCurrentPrompt('')
+    setJournalText('')
+    setCurrentJournalId(null)
   setJournal([])
   setJournalTotal(0)
   setJournalPage(0)
@@ -63,31 +59,27 @@ function App() {
   setGoals([])
     setIsSending(false)
     setIsLoading(false)
-    setIsStreaming(false)
   }, [userId])
 
-  // Animate message entrance when currentMessage changes
+  // Animate prompt entrance when currentPrompt changes
   useEffect(() => {
-    if (currentMessage && scope.current && isJournaling) {
-      const animateMessage = async () => {
+    if (currentPrompt && scope.current && isJournaling) {
+      const animatePrompt = async () => {
         // Find elements to animate
-        const label = scope.current?.querySelector('[data-label]')
-        const messageBox = scope.current?.querySelector('[data-message]')
+        const promptBox = scope.current?.querySelector('[data-prompt]')
         
-        if (label && messageBox) {
-          // Set initial states
-          await animate([label, messageBox], { opacity: 0, y: 12 }, { duration: 0 })
-          
-          // Animate in sequence
-          await animate(label, { opacity: 1, y: 0 }, { duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] })
-          await animate(messageBox, { opacity: 1, y: 0, scale: 1 }, { duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] })
+        if (promptBox) {
+          // Set initial state
+          await animate(promptBox, { opacity: 0, y: 12 }, { duration: 0 })
+          // Animate to final state
+          await animate(promptBox, { opacity: 1, y: 0 }, { duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] })
         }
       }
       
       // Small delay to ensure DOM is updated
-      setTimeout(animateMessage, 50)
+      setTimeout(animatePrompt, 50)
     }
-  }, [currentMessage, animate, scope, isJournaling])
+  }, [currentPrompt, animate, scope, isJournaling])
 
   // Placeholder to demonstrate journal API wiring; future: manage in state and render list
   useEffect(() => {
@@ -125,23 +117,6 @@ function App() {
             setJournal(jItems)
             setJournalPage(1)
           }
-        }
-
-  // Load recent conversations for history (but don't display them)
-        const cRes = await fetch(`${apiBase}/conversations?limit=50`, {
-          headers: {
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-        })
-        if (cRes.ok) {
-          const cItems: Array<{id:number; user_message:string; ai_response:string; timestamp:string}> = await cRes.json()
-          const ordered = cItems.sort((a,b)=> new Date(a.timestamp).getTime()-new Date(b.timestamp).getTime())
-          const restored: Message[] = []
-          for (const item of ordered) {
-            restored.push({ id: `${item.id}-u`, text: item.user_message, sender: 'user', timestamp: new Date(item.timestamp) })
-            restored.push({ id: `${item.id}-a`, text: item.ai_response, sender: 'ai', timestamp: new Date(item.timestamp) })
-          }
-          if (!ignore) setConversationHistory(restored)
         }
 
         // Load user goals (best-effort)
@@ -182,191 +157,6 @@ function App() {
     } catch {}
   }, [userId, journalPage, journalTotal, apiBase, getToken, jwtTemplate])
 
-  const sendMessage = useCallback(async (text: string) => {
-    if (!text.trim()) return
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      text,
-      sender: 'user',
-      timestamp: new Date()
-    }
-
-    // Store in history and set as current message
-    setConversationHistory(prev => [...prev, userMessage])
-    setCurrentMessage(userMessage)
-    setIsLoading(true)
-    setIsJournaling(true)
-
-    try {
-      let token: string | null | undefined = null
-      try {
-        token = await getToken?.({ template: jwtTemplate })
-      } catch (e) {
-        console.warn(`Clerk getToken failed for template "${jwtTemplate}". Check your Clerk JWT template configuration.`, e)
-      }
-
-      // Try streaming first
-      try {
-        const streamResponse = await fetch(`${apiBase}/chat/stream`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({ message: text }),
-        })
-
-        if (streamResponse.ok && streamResponse.body) {
-          // Switch to streaming mode
-          setIsLoading(false)
-          setIsStreaming(true)
-          
-          // Create AI message placeholder
-          const aiMessageId = (Date.now() + 1).toString()
-          const aiMessage: Message = {
-            id: aiMessageId,
-            text: '',
-            sender: 'ai',
-            timestamp: new Date()
-          }
-          
-          setConversationHistory(prev => [...prev, aiMessage])
-          setCurrentMessage(aiMessage)
-
-          const reader = streamResponse.body.getReader()
-          const decoder = new TextDecoder()
-          let fullText = ''
-
-          try {
-            while (true) {
-              const { done, value } = await reader.read()
-              if (done) break
-
-              const chunk = decoder.decode(value, { stream: true })
-              const lines = chunk.split('\n')
-              
-              for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                  const data = line.slice(6)
-                  if (data === '[DONE]') continue
-                  
-                  try {
-                    const parsed = JSON.parse(data)
-                    if (parsed.content) {
-                      fullText += parsed.content
-                      
-                      // Update the current message with streaming text
-                      setCurrentMessage(prev => prev ? { ...prev, text: fullText } : prev)
-                    }
-                  } catch (e) {
-                    // Skip invalid JSON
-                  }
-                }
-              }
-            }
-
-            // Final update to conversation history and current message
-            setConversationHistory(prev => 
-              prev.map(msg => msg.id === aiMessageId ? { ...msg, text: fullText } : msg)
-            )
-            
-            // Ensure current message also has the final text
-            setCurrentMessage(prev => prev ? { ...prev, text: fullText } : prev)
-          } finally {
-            // Small delay to ensure smooth transition from streaming to regular display
-            setTimeout(() => {
-              setIsStreaming(false)
-            }, 200)
-          }
-          
-          return // Success with streaming
-        }
-      } catch (streamError) {
-        // Streaming failed, fall back to regular chat
-        setIsStreaming(false)
-      }
-
-      // Fallback to regular non-streaming chat
-      const response = await fetch(`${apiBase}/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ message: text }),
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to get response')
-      }
-
-      const data = await response.json()
-      
-      const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: data.response,
-        sender: 'ai',
-        timestamp: new Date()
-      }
-
-      // Add a small delay before showing AI response for better UX
-      setTimeout(() => {
-        setConversationHistory(prev => [...prev, aiMessage])
-        setCurrentMessage(aiMessage)
-      }, 300)
-    } catch (error) {
-      console.error('Error sending message:', error)
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: 'Sorry, I encountered an error. Please try again.',
-        sender: 'ai',
-        timestamp: new Date()
-      }
-      setTimeout(() => {
-        setConversationHistory(prev => [...prev, errorMessage])
-        setCurrentMessage(errorMessage)
-      }, 300)
-    } finally {
-      setIsLoading(false)
-      setIsStreaming(false)
-    }
-  }, [getToken, jwtTemplate, apiBase])
-
-  const createJournalEntry = async (content: string, title?: string | null) => {
-    try {
-      let token: string | null | undefined = null
-      try {
-        token = await getToken?.({ template: jwtTemplate })
-      } catch (e) {
-        console.warn(`Clerk getToken failed for template "${jwtTemplate}". Check your Clerk JWT template configuration.`, e)
-      }
-      // Apply default timestamped title if none provided
-      let finalTitle = title ?? null
-      if (!finalTitle || !finalTitle.trim()) {
-        const d = new Date()
-        const pad = (n: number) => n.toString().padStart(2, '0')
-        const ts = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-        finalTitle = `Journal Entry - ${ts}`
-      }
-      const res = await fetch(`${apiBase}/journal`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ title: finalTitle, content }),
-      })
-      if (res.ok) {
-        const item = await res.json()
-        setJournal(prev => [item, ...prev])
-  // Insights dashboard will refresh itself when opened
-      }
-    } catch (e) {
-      console.warn('Failed to create journal entry', e)
-    }
-  }
-
   const updateJournalEntry = async (id: number, updates: { title?: string; content?: string }) => {
     try {
       let token: string | null | undefined = null
@@ -385,6 +175,76 @@ function App() {
     return false
   }
 
+  const updateJournalPrompt = useCallback(async () => {
+    if (!journalText.trim()) return
+
+    setIsLoading(true)
+    setIsSending(true)
+
+    try {
+      let token: string | null | undefined = null
+      try {
+        token = await getToken?.({ template: jwtTemplate })
+      } catch (e) {
+        console.warn(`Clerk getToken failed for template "${jwtTemplate}". Check your Clerk JWT template configuration.`, e)
+      }
+
+      // Send current journal text to get an updated prompt
+      const response = await fetch(`${apiBase}/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ 
+          message: journalText,
+          instructions: "Provide a short, focused response (one paragraph maximum). Ask only ONE specific question or prompt to help deepen their reflection. Keep it concise and encouraging."
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to get updated prompt')
+      }
+
+      const data = await response.json()
+      
+      // Update the prompt with AI guidance
+      setCurrentPrompt(data.response)
+
+      // Update the journal entry in the database if we have an ID
+      if (currentJournalId) {
+        await updateJournalEntry(currentJournalId, { content: journalText })
+      } else {
+        // Create a new journal entry if this is the first save
+        const title = `Journal Entry - ${new Date().toLocaleDateString()}`
+        const res = await fetch(`${apiBase}/journal`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ title, content: journalText }),
+        })
+        if (res.ok) {
+          const item = await res.json()
+          setCurrentJournalId(item.id)
+          setJournal(prev => [item, ...prev])
+        }
+      }
+      
+      // Focus text area after updating
+      if (journalTextareaRef.current) {
+        journalTextareaRef.current.focus()
+      }
+    } catch (error) {
+      console.error('Error updating journal prompt:', error)
+      setCurrentPrompt('I encountered an error processing your entry. Please continue writing and try again.')
+    } finally {
+      setIsLoading(false)
+      setIsSending(false)
+    }
+  }, [journalText, getToken, jwtTemplate, apiBase, currentJournalId, updateJournalEntry])
+
   const deleteJournalEntry = async (id: number) => {
     try {
       let token: string | null | undefined = null
@@ -402,41 +262,27 @@ function App() {
     return false
   }
 
-  const handleSendMessage = useCallback(async () => {
-    if (!inputText.trim()) return
-    const text = inputText
-    setInputText('')
+  const handleContinueWriting = useCallback(async () => {
+    if (!journalText.trim()) return
+    
     setIsSending(true)
     
     try {
-      // Animate current message out with a smooth transition (only if there's a message)
-      if (currentMessage && scope.current) {
-        await animate(scope.current, { opacity: 0, y: -20 }, { duration: 0.3 })
-      }
+      await updateJournalPrompt()
       
-      await sendMessage(text)
-      
-      // Animate new message in (only animate the scoped content)
-      if (scope.current) {
-        // Set initial state for entrance
-        await animate(scope.current, { opacity: 0, y: 20 }, { duration: 0 })
-        // Animate to final state
-        await animate(scope.current, { opacity: 1, y: 0 }, { duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] })
-      }
-      
-      // Focus text area after animation
-      if (textareaRef.current) {
-        textareaRef.current.focus()
+      // Focus text area after processing
+      if (journalTextareaRef.current) {
+        journalTextareaRef.current.focus()
       }
     } finally {
       setIsSending(false)
     }
-  }, [inputText, animate, sendMessage, scope, currentMessage])
+  }, [updateJournalPrompt])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && e.ctrlKey) {
       e.preventDefault()
-      handleSendMessage()
+      handleContinueWriting()
     }
   }
 
@@ -607,6 +453,8 @@ function App() {
   const startJournaling = async () => {
     setIsJournaling(true)
     setIsLoading(true)
+    setJournalText('')
+    setCurrentJournalId(null)
     
     try {
       let token: string | null | undefined = null
@@ -625,54 +473,59 @@ function App() {
       
       if (response.ok) {
         const data = await response.json()
-        const openingMessage: Message = {
-          id: Date.now().toString(),
-          text: data.message,
-          sender: 'ai',
-          timestamp: new Date()
-        }
-        setCurrentMessage(openingMessage)
-        setConversationHistory([openingMessage])
+        setCurrentPrompt(data.message)
       } else {
         // Fallback to a default message if API fails
-        const fallbackMessage: Message = {
-          id: Date.now().toString(),
-          text: "What's on your mind today?",
-          sender: 'ai',
-          timestamp: new Date()
-        }
-        setCurrentMessage(fallbackMessage)
-        setConversationHistory([fallbackMessage])
+        setCurrentPrompt("What's on your mind today? Take your time to reflect and write about whatever feels important right now.")
       }
     } catch (error) {
       console.error('Error fetching opening prompt:', error)
       // Fallback to a default message
-      const fallbackMessage: Message = {
-        id: Date.now().toString(),
-        text: "How are you feeling today?",
-        sender: 'ai',
-        timestamp: new Date()
-      }
-      setCurrentMessage(fallbackMessage)
-      setConversationHistory([fallbackMessage])
+      setCurrentPrompt("How are you feeling today? Let your thoughts flow freely as you write.")
     } finally {
       setIsLoading(false)
     }
   }
 
-  const finishJournaling = () => {
-    setIsJournaling(false)
-    setCurrentMessage(null)
-    // Save all conversation history to journal
-    // Only include user messages when saving the journal entry
-    const journalContent = conversationHistory
-      .filter(msg => msg.sender === 'user')
-      .map(msg => msg.text)
-      .join('\n\n')
-    
-    if (journalContent.trim()) {
-      createJournalEntry(journalContent, `Journal Entry - ${new Date().toLocaleDateString()}`)
+  const finishJournaling = async () => {
+    // Save final journal entry if we have content
+    if (journalText.trim()) {
+      if (currentJournalId) {
+        // Update existing entry
+        await updateJournalEntry(currentJournalId, { content: journalText })
+      } else {
+        // Create new entry if not already created
+        const title = `Journal Entry - ${new Date().toLocaleDateString()}`
+        try {
+          let token: string | null | undefined = null
+          try {
+            token = await getToken?.({ template: jwtTemplate })
+          } catch {
+            // Ignore token errors
+          }
+          const res = await fetch(`${apiBase}/journal`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ title, content: journalText }),
+          })
+          if (res.ok) {
+            const item = await res.json()
+            setJournal(prev => [item, ...prev])
+          }
+        } catch (e) {
+          console.warn('Failed to create journal entry', e)
+        }
+      }
     }
+    
+    // Reset journaling state
+    setIsJournaling(false)
+    setCurrentPrompt('')
+    setJournalText('')
+    setCurrentJournalId(null)
   }
 
   return (
@@ -682,74 +535,45 @@ function App() {
           name={user?.firstName || user?.fullName || undefined}
           onSubmit={async (text) => {
             await startJournaling()
-            // After starting with AI prompt, send user's message
-            setTimeout(() => sendMessage(text), 1000)
+            // Set the initial journal text to what the user entered
+            setJournalText(text)
           }}
         />
       )}
 
       <SignedIn>
   {isJournaling ? (
-          // Fullscreen Journaling Experience - Matches KeoIntro styling
+          // Fullscreen Journal Entry Experience
           <div className="fixed inset-0 z-50">
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-50 via-white to-cyan-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900" />
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-100/30 via-transparent to-cyan-100/30 dark:from-indigo-900/20 dark:to-cyan-900/20" />
             <div className="absolute inset-0 backdrop-blur-[120px]" />
-            <div className="relative flex min-h-screen items-center justify-center text-slate-900 dark:text-slate-100">
-              <div className="mx-auto w-full max-w-2xl px-6">
-                <div className="text-center">
+            <div className="relative min-h-screen text-slate-900 dark:text-slate-100">
+              <div className="mx-auto w-full max-w-5xl px-6 py-8 min-h-screen overflow-y-auto">
+                <div className="space-y-8 flex flex-col min-h-full">
                   
-                  {/* Message Display - Inside Animated Scope */}
-                  <div ref={scope}>
-                    {currentMessage && !(isStreaming && currentMessage.sender === 'ai') && (
-                      <div className="space-y-6" style={{ opacity: 1, transform: 'translateY(0px)' }}>
-                        {currentMessage.sender === 'user' ? (
-                          <div className="space-y-4">
-                            <p data-label className="text-sm uppercase tracking-widest text-slate-500 dark:text-slate-400" style={{ opacity: 0, transform: 'translateY(8px)' }}>You shared</p>
-                            <div data-message className="text-lg leading-relaxed text-slate-700 dark:text-slate-300 bg-white/60 dark:bg-slate-800/60 backdrop-blur-sm rounded-2xl p-6 border border-white/20 shadow-lg max-h-[50vh] overflow-y-auto transform transition-all duration-500 ease-out w-full max-w-4xl mx-auto" style={{ opacity: 0, transform: 'translateY(12px) scale(0.98)' }}>
-                              <div className="whitespace-pre-wrap leading-relaxed">
-                                {currentMessage.text}
-                              </div>
-                            </div>
+                  {/* AI Prompt Display */}
+                  <div ref={scope} className="flex-shrink-0">
+                    {currentPrompt && !isLoading && (
+                      <div className="text-center space-y-4">
+                        <p className="text-sm uppercase tracking-widest text-slate-500 dark:text-slate-400">Keo suggests</p>
+                        <div 
+                          data-prompt
+                          className="text-lg leading-relaxed text-slate-700 dark:text-slate-300 bg-white/60 dark:bg-slate-800/60 backdrop-blur-sm rounded-2xl p-6 border border-white/20 shadow-lg mx-auto max-w-3xl"
+                          style={{ opacity: 1, transform: 'translateY(0px)' }}
+                        >
+                          <div className="whitespace-pre-wrap leading-relaxed">
+                            {currentPrompt}
                           </div>
-                        ) : (
-                          <div className="space-y-4">
-                            <p data-label className="text-sm uppercase tracking-widest text-slate-500 dark:text-slate-400" style={{ opacity: 0, transform: 'translateY(8px)' }}>Keo responds</p>
-                            <div data-message className="text-lg leading-relaxed text-slate-700 dark:text-slate-300 bg-white/60 dark:bg-slate-800/60 backdrop-blur-sm rounded-2xl p-6 border border-white/20 shadow-lg max-h-[50vh] overflow-y-auto transform transition-all duration-500 ease-out w-full max-w-4xl mx-auto" style={{ opacity: 0, transform: 'translateY(12px) scale(0.98)' }}>
-                              <div className="whitespace-pre-wrap leading-relaxed">
-                                {currentMessage.text}
-                              </div>
-                            </div>
-                          </div>
-                        )}
+                        </div>
                       </div>
                     )}
                   </div>
 
-                  {/* Loading States - Outside Animated Scope */}
-                  {/* Sending State - Immediate Feedback */}
-                  {isSending && !isLoading && (
-                    <div className="space-y-4 animate-in fade-in duration-300">
-                      <p className="text-sm uppercase tracking-widest text-slate-500 dark:text-slate-400">Sending your message</p>
-                      <div className="w-full max-w-xl mx-auto">
-                        <div className="h-1 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                          <div className="h-full bg-gradient-to-r from-indigo-400 to-indigo-600 rounded-full animate-pulse" 
-                               style={{
-                                 width: '30%',
-                                 animation: 'loadingBar 1s ease-in-out infinite'
-                               }}>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Loading State with Progress Bar */}
+                  {/* Loading State */}
                   {isLoading && (
-                    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                      <p className="text-sm uppercase tracking-widest text-slate-500 dark:text-slate-400 animate-in fade-in slide-in-from-bottom-2 duration-300 delay-100">Keo is thinking</p>
-                      
-                      {/* Loading Progress Bar */}
+                    <div className="text-center space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 flex-shrink-0">
+                      <p className="text-sm uppercase tracking-widest text-slate-500 dark:text-slate-400">Keo is thinking</p>
                       <div className="w-full max-w-xl mx-auto">
                         <div className="h-1 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
                           <div className="h-full bg-gradient-to-r from-indigo-400 to-indigo-600 rounded-full animate-pulse" 
@@ -760,8 +584,7 @@ function App() {
                           </div>
                         </div>
                       </div>
-
-                      <div className="bg-white/60 dark:bg-slate-800/60 backdrop-blur-sm rounded-2xl p-6 border border-white/20 shadow-lg animate-in fade-in slide-in-from-bottom-4 duration-400 delay-200 w-full max-w-4xl mx-auto">
+                      <div className="bg-white/60 dark:bg-slate-800/60 backdrop-blur-sm rounded-2xl p-6 border border-white/20 shadow-lg max-w-3xl mx-auto">
                         <div className="space-y-3">
                           <Skeleton className="h-4 w-5/6 animate-pulse" />
                           <Skeleton className="h-4 w-2/3 animate-pulse" style={{ animationDelay: '0.1s' }} />
@@ -771,58 +594,53 @@ function App() {
                     </div>
                   )}
 
-                  {/* Streaming State - Show message content while streaming */}
-                  {isStreaming && currentMessage && currentMessage.sender === 'ai' && (
-                    <div className="space-y-6 animate-in fade-in duration-300">
-                      <div className="space-y-4">
-                        <p className="text-sm uppercase tracking-widest text-slate-500 dark:text-slate-400">Keo responds</p>
-                        
-                        {/* Streaming Message Content */}
-                        <div className="text-lg leading-relaxed text-slate-700 dark:text-slate-300 bg-white/60 dark:bg-slate-800/60 backdrop-blur-sm rounded-2xl p-6 border border-white/20 shadow-lg max-h-[50vh] overflow-y-auto w-full max-w-4xl mx-auto">
-                          <div className="whitespace-pre-wrap leading-relaxed">
-                            {currentMessage.text}
-                            <span className="inline-block w-2 h-5 bg-slate-400 dark:bg-slate-300 ml-1 animate-pulse"></span>
-                          </div>
-                        </div>
+                  {/* Large Text Area for Journal Entry - flex-grow to take available space */}
+                  <div className="flex flex-col space-y-6 flex-1 min-h-0">
+                    {!isLoading && (
+                      <div className="text-center flex-shrink-0">
+                        <label className="block text-sm text-slate-500 dark:text-slate-400 mb-3">
+                          {journalText.trim() ? "Continue writing your thoughts..." : "Start writing your journal entry..."}
+                        </label>
                       </div>
+                    )}
+                    
+                    <div className="w-full flex-1 min-h-0">
+                      <Textarea
+                        ref={journalTextareaRef}
+                        value={journalText}
+                        onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setJournalText(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        placeholder="What's on your mind? Let your thoughts flow freely here. You can use **markdown** formatting like *italics* and **bold**."
+                        disabled={isLoading || isSending}
+                        className="w-full h-full min-h-[300px] text-base bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border border-white/20 dark:border-slate-700/50 rounded-2xl p-6 shadow-lg resize-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
+                      />
                     </div>
-                  )}
-
-                </div>
-
-                {/* Input Area */}
-                <div className="mt-10">
-                  {currentMessage?.sender === 'ai' && !isLoading && (
-                    <label className="block text-center text-sm text-slate-500 dark:text-slate-400 mb-3">
-                      How does this resonate with you?
-                    </label>
-                  )}
-                  
-                  <div className="flex flex-col items-center gap-3">
-                    <Textarea
-                      ref={textareaRef}
-                      value={inputText}
-                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setInputText(e.target.value)}
-                      onKeyDown={handleKeyDown}
-                      placeholder={currentMessage ? "Continue the conversation..." : "What's on your mind today?"}
-                      rows={3}
-                      disabled={isLoading || isSending || isStreaming}
-                      className="w-full max-w-4xl text-base"
-                    />
-                    <div className="flex items-center gap-2">
+                  </div>
+                    
+                  {/* Action Buttons - Always visible at bottom */}
+                  <div className="flex-shrink-0 space-y-4">
+                    <div className="flex items-center justify-center gap-4">
                       <Button 
-                        onClick={handleSendMessage} 
-                        disabled={!inputText.trim() || isLoading || isSending || isStreaming}
-                        className={`transition-all duration-200 ${(isSending || isLoading || isStreaming) ? 'opacity-75' : ''}`}
+                        onClick={handleContinueWriting} 
+                        disabled={!journalText.trim() || isLoading || isSending}
+                        className={`transition-all duration-200 ${(isSending || isLoading) ? 'opacity-75' : ''} bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white rounded-xl px-6 py-2`}
                       >
-                        {isSending ? 'Sending...' : isLoading ? 'Thinking...' : isStreaming ? 'Responding...' : 'Share'}
+                        {isSending ? 'Getting guidance...' : isLoading ? 'Processing...' : 'Continue with AI guidance'}
+                        <span className="text-xs ml-2 opacity-75">(Ctrl+Enter)</span>
                       </Button>
                       <Button 
                         onClick={finishJournaling}
                         variant="outline" 
+                        className="rounded-xl px-6 py-2 border-slate-300 dark:border-slate-600"
                       >
-                        Finish
+                        Finish & Save
                       </Button>
+                    </div>
+
+                    {/* Character count and writing tips */}
+                    <div className="text-center text-xs text-slate-400 dark:text-slate-500 space-y-1">
+                      <p>{journalText.length} characters written</p>
+                      <p>💡 Tip: Use Ctrl+Enter to get AI guidance while keeping your text editable</p>
                     </div>
                   </div>
                 </div>
