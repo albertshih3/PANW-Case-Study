@@ -13,6 +13,7 @@ from services.ai_service import AIService
 from services.memory_service import MemoryService
 from services.vector_insights_service import VectorInsightsService
 from services.auth import get_current_user_id
+from services.crypto_utils import decrypt_text_for_user
 
 base_dir = Path(__file__).resolve().parent
 # Load env from backend/.env then project root .env
@@ -33,6 +34,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Warn if encryption secret is not configured (journals/goals would be stored in plaintext)
+if not os.getenv("DATA_ENCRYPTION_SECRET"):
+    print(
+        "⚠️  DATA_ENCRYPTION_SECRET is not set — journal entries and goals will be stored in plaintext. "
+        "Set this in backend/.env or your deployment environment to enable at-rest encryption."
+    )
+
+@app.get("/encryption/status")
+async def encryption_status():
+    """Report whether at-rest encryption is active (secret present and crypto available)."""
+    has_secret = bool(os.getenv("DATA_ENCRYPTION_SECRET"))
+    enabled = False
+    reason = ""
+    if not has_secret:
+        reason = "DATA_ENCRYPTION_SECRET missing"
+    else:
+        try:
+            import importlib
+            importlib.import_module('cryptography.hazmat.primitives.ciphers.aead')
+            enabled = True
+        except Exception as e:
+            reason = f"cryptography not available: {e.__class__.__name__}"
+    return {"encryption_enabled": enabled, "has_secret": has_secret, "reason": reason}
 
 ai_service = AIService()
 memory_service = MemoryService()
@@ -56,16 +81,13 @@ async def chat(request: ChatRequest, clerk_user_id: str = Depends(get_current_us
         # ensure user exists in DB
         memory_service.ensure_user(clerk_user_id)
 
-        # Get relevant memories for context
+    # Get relevant memories for context (from journal entries only)
         relevant_memories = await memory_service.get_relevant_memories(clerk_user_id, user_message)
         # Fetch user goals to steer responses
         user_goals = memory_service.get_user_goals(clerk_user_id)
         # Fetch user privacy settings
         # Generate AI response (PII is sanitized inside AI service)
         ai_response = await ai_service.generate_response(user_message, relevant_memories, user_goals)
-
-        # Store the conversation in memory
-        await memory_service.store_conversation(clerk_user_id, user_message, ai_response)
 
         return ChatResponse(response=ai_response, timestamp=datetime.now())
 
@@ -79,7 +101,7 @@ async def chat_stream(request: ChatRequest, clerk_user_id: str = Depends(get_cur
         # ensure user exists in DB
         memory_service.ensure_user(clerk_user_id)
 
-        # Get relevant memories for context
+    # Get relevant memories for context (from journal entries only)
         relevant_memories = await memory_service.get_relevant_memories(clerk_user_id, user_message)
         # Fetch user goals to steer responses
         user_goals = memory_service.get_user_goals(clerk_user_id)
@@ -92,9 +114,6 @@ async def chat_stream(request: ChatRequest, clerk_user_id: str = Depends(get_cur
                 chunk_data = {"content": chunk}
                 # Send each chunk as a Server-Sent Event
                 yield f"data: {json.dumps(chunk_data)}\n\n"
-            
-            # Store the complete conversation in memory after streaming is done
-            await memory_service.store_conversation(clerk_user_id, user_message, full_response)
             
             # Send completion signal
             yield f"data: [DONE]\n\n"
@@ -163,11 +182,7 @@ async def create_journal(payload: JournalCreate, clerk_user_id: str = Depends(ge
     raise HTTPException(status_code=500, detail="Failed to load created journal entry")
 
 
-@app.get("/conversations")
-async def list_conversations(clerk_user_id: str = Depends(get_current_user_id), limit: int = 50):
-    memory_service.ensure_user(clerk_user_id)
-    items = memory_service.list_conversations(clerk_user_id, limit=limit)
-    return items
+# Conversations endpoint removed for privacy.
 
 
 class OpeningPromptResponse(BaseModel):
@@ -215,14 +230,14 @@ async def get_journal_insights(entry_id: int, clerk_user_id: str = Depends(get_c
     """Get AI-powered insights for a specific journal entry."""
     try:
         memory_service.ensure_user(clerk_user_id)
-        
+
         # Get the specific journal entry
         entries = memory_service.list_journal_entries(clerk_user_id, limit=100)
         entry = next((e for e in entries if e["id"] == entry_id), None)
-        
+
         if not entry:
             raise HTTPException(status_code=404, detail="Journal entry not found")
-        
+
         # Analyze the entry for insights (cached by entry id + updated_at)
         insights = await vector_insights_service.analyze_journal_entry_fast_cached(
             entry.get("content", ""),
@@ -230,13 +245,13 @@ async def get_journal_insights(entry_id: int, clerk_user_id: str = Depends(get_c
             clerk_user_id,
             entry.get("updated_at")
         )
-        
+
         return JournalInsightsResponse(
             entry_id=entry_id,
             insights=insights,
             generated_at=datetime.now()
         )
-        
+
     except HTTPException:
         raise
     except ValueError as ve:
@@ -467,50 +482,48 @@ async def get_insights_dashboard(clerk_user_id: str = Depends(get_current_user_i
     """Get comprehensive dashboard data including trends, recent insights, and statistics."""
     try:
         memory_service.ensure_user(clerk_user_id)
-        
+
         # Get journal entries
         entries = memory_service.list_journal_entries(clerk_user_id, limit=30)
-        conversations = memory_service.list_conversations(clerk_user_id, limit=30)
-        
+
         # Helper function to safely parse datetime
         def safe_datetime_parse(dt_value):
             if isinstance(dt_value, str):
                 try:
                     return datetime.fromisoformat(dt_value.replace('Z', '+00:00'))
-                except:
+                except Exception:
                     return datetime.now()
             elif hasattr(dt_value, 'year'):  # datetime object
                 return dt_value
             else:
                 return datetime.now()
-        
+
         # Basic statistics
         cutoff_week = datetime.now() - timedelta(days=7)
         cutoff_month = datetime.now() - timedelta(days=30)
-        
+
         stats = {
             "total_entries": len(entries),
-            "total_conversations": len(conversations),
             "entries_this_week": len([
-                e for e in entries 
+                e for e in entries
                 if safe_datetime_parse(e["created_at"]) >= cutoff_week
             ]),
             "entries_this_month": len([
-                e for e in entries 
+                e for e in entries
                 if safe_datetime_parse(e["created_at"]) >= cutoff_month
             ])
         }
-        
+
         # Get recent trends using fast vector-based analysis
         try:
             trends = await vector_insights_service.analyze_trends_fast([dict(e) for e in entries[:10]])
         except (ValueError, RuntimeError) as e:
             raise HTTPException(status_code=400, detail=f"Trend analysis failed: {str(e)}")
-        
+
         # Get insights for most recent entries
         recent_insights = []
         analysis_errors = []
-        
+
         if len(entries) > 0:
             for entry in entries[:5]:  # Last 5 entries
                 try:
@@ -535,22 +548,22 @@ async def get_insights_dashboard(clerk_user_id: str = Depends(get_current_user_i
                     print(f"Error analyzing entry {entry['id']}: {e}")
                     analysis_errors.append(f"Entry '{entry.get('title', 'Untitled')}': {str(e)}")
                     # Skip entries that can't be analyzed instead of adding fake data
-        
+
         # If all entries failed analysis, return error
         if len(entries) > 0 and len(recent_insights) == 0:
             error_details = "; ".join(analysis_errors[:3])  # Show first 3 errors
             raise HTTPException(
-                status_code=400, 
+                status_code=400,
                 detail=f"Unable to analyze any journal entries. Issues: {error_details}"
             )
-        
+
         return {
             "statistics": stats,
             "trends": trends,
             "recent_insights": recent_insights,
             "generated_at": datetime.now()
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -664,9 +677,10 @@ async def get_period_summary(period: str = "week", clerk_user_id: str = Depends(
 # --- New: User data export endpoint ---
 @app.get("/export")
 async def export_user_data(download: bool = False, clerk_user_id: str = Depends(get_current_user_id)):
-    """Export the user's data (journals, conversations, and goals) as JSON.
+    """Export the user's data (journals and goals) as JSON.
 
     - Set download=true to suggest a file download in browsers.
+    Conversations are not retained and will be an empty list in the payload for compatibility.
     """
     try:
         memory_service.ensure_user(clerk_user_id)

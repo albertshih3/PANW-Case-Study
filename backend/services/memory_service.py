@@ -6,6 +6,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from pgvector.psycopg2 import register_vector
 import numpy as np
+from .crypto_utils import encrypt_text_for_user, decrypt_text_for_user
 
 class MemoryService:
     def __init__(self):
@@ -32,23 +33,12 @@ class MemoryService:
             conn = self._connect()
             cursor = conn.cursor()
             
-            # Create table for storing conversations with embeddings
+            # Create table for users
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id SERIAL PRIMARY KEY,
                     clerk_user_id TEXT UNIQUE NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
-
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS conversations (
-                    id SERIAL PRIMARY KEY,
-                    clerk_user_id TEXT NOT NULL,
-                    user_message TEXT NOT NULL,
-                    ai_response TEXT NOT NULL,
-                    embedding VECTOR(1536),
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
 
@@ -72,22 +62,6 @@ class MemoryService:
             """)
             
             conn.commit()
-            # Lightweight schema migration for existing DBs where conversations may lack clerk_user_id
-            try:
-                cursor.execute(
-                    """
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_name = 'conversations' AND column_name = 'clerk_user_id'
-                    """
-                )
-                has_clerk_column = cursor.fetchone() is not None
-                if not has_clerk_column:
-                    cursor.execute("ALTER TABLE conversations ADD COLUMN clerk_user_id TEXT")
-                    print("✓ Added missing column conversations.clerk_user_id")
-                    conn.commit()
-            except Exception as mig_e:
-                # Non-fatal; storage can still proceed without clerk_user_id, but features will be limited
-                print(f"Warning: Schema migration check failed: {mig_e}")
             cursor.close()
             conn.close()
             print("✓ Memory database initialized")
@@ -96,46 +70,25 @@ class MemoryService:
             print(f"Warning: Could not initialize memory database: {e}")
             print("Memory features will be disabled")
     
-    async def store_conversation(self, clerk_user_id: str, user_message: str, ai_response: str):
-        try:
-            # No embeddings; store message and response only (embedding remains NULL)
-            embedding = None
-            
-            # Store in database
-            conn = self._connect()
-            cursor = conn.cursor()
-            
-            cursor.execute(
-                """
-                INSERT INTO conversations (clerk_user_id, user_message, ai_response, embedding)
-                VALUES (%s, %s, %s, %s)
-                """,
-                (clerk_user_id, user_message, ai_response, embedding),
-            )
-            
-            conn.commit()
-            cursor.close()
-            conn.close()
-            
-        except Exception as e:
-            print(f"Error storing conversation: {e}")
-    
     async def get_relevant_memories(self, clerk_user_id: str, query: str, limit: int = 3) -> List[str]:
         try:
-            # Lexical similarity (cosine on bag-of-words) over recent conversations
+            # Lexical similarity (cosine on bag-of-words) over recent journal entries
             conn = self._connect()
             cursor = conn.cursor(cursor_factory=RealDictCursor)
             cursor.execute(
                 """
-                SELECT id, user_message, ai_response, timestamp
-                FROM conversations
+                SELECT id, content, created_at
+                FROM journal_entries
                 WHERE clerk_user_id = %s
-                ORDER BY timestamp DESC
+                ORDER BY created_at DESC
                 LIMIT 200
                 """,
                 (clerk_user_id,),
             )
             rows = cursor.fetchall() or []
+            # Decrypt content for similarity
+            for row in rows:
+                row["content"] = decrypt_text_for_user(clerk_user_id, row.get("content"))
             cursor.close()
             conn.close()
 
@@ -164,7 +117,7 @@ class MemoryService:
 
             scored: List[Dict[str, Any]] = []
             for row in rows:
-                d_tokens = tokenize(row.get("user_message") or "")
+                d_tokens = tokenize(row.get("content") or "")
                 d_vec = vec(d_tokens)
                 sim = float(np.dot(q_vec, d_vec)) if q_vec.size and d_vec.size else 0.0
                 if sim > 0:
@@ -172,7 +125,7 @@ class MemoryService:
 
             scored.sort(key=lambda x: x["sim"], reverse=True)
             top = scored[:limit]
-            return [f"Previous entry: {it['row']['user_message']}" for it in top]
+            return [f"Previous entry: {it['row']['content']}" for it in top]
             
         except Exception as e:
             print(f"Error retrieving memories: {e}")
@@ -206,7 +159,11 @@ class MemoryService:
                 VALUES (%s, %s, %s)
                 RETURNING id
                 """,
-                (clerk_user_id, title, content),
+                (
+                    clerk_user_id,
+                    encrypt_text_for_user(clerk_user_id, title) if title is not None else None,
+                    encrypt_text_for_user(clerk_user_id, content),
+                ),
             )
             row = cursor.fetchone()
             conn.commit()
@@ -232,6 +189,10 @@ class MemoryService:
                 (clerk_user_id, limit, offset),
             )
             rows = cursor.fetchall()
+            # Decrypt fields
+            for r in rows:
+                r["title"] = decrypt_text_for_user(clerk_user_id, r.get("title")) if r.get("title") is not None else None
+                r["content"] = decrypt_text_for_user(clerk_user_id, r.get("content"))
             cursor.close()
             conn.close()
             return rows
@@ -251,10 +212,10 @@ class MemoryService:
             params = []
             if title is not None:
                 fields.append("title = %s")
-                params.append(title)
+                params.append(encrypt_text_for_user(clerk_user_id, title))
             if content is not None:
                 fields.append("content = %s")
-                params.append(content)
+                params.append(encrypt_text_for_user(clerk_user_id, content))
             fields.append("updated_at = CURRENT_TIMESTAMP")
             params.extend([clerk_user_id, entry_id])
             query = f"UPDATE journal_entries SET {', '.join(fields)} WHERE clerk_user_id = %s AND id = %s"
@@ -288,27 +249,9 @@ class MemoryService:
             print(f"Error deleting journal entry: {e}")
             return False
 
-    def list_conversations(self, clerk_user_id: str, limit: int = 20):
-        try:
-            conn = self._connect()
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
-            cursor.execute(
-                """
-                SELECT id, user_message, ai_response, timestamp
-                FROM conversations
-                WHERE clerk_user_id = %s
-                ORDER BY timestamp DESC
-                LIMIT %s
-                """,
-                (clerk_user_id, limit),
-            )
-            rows = cursor.fetchall()
-            cursor.close()
-            conn.close()
-            return rows
-        except Exception as e:
-            print(f"Error listing conversations: {e}")
-            return []
+    # Conversations are not stored; nothing to delete.
+
+    # Conversations storage removed for privacy; no conversation listing retained.
 
 
     # --- User goals CRUD ---
@@ -329,7 +272,8 @@ class MemoryService:
                 return []
             try:
                 import json
-                goals = json.loads(row["goals_json"]) or []
+                decrypted = decrypt_text_for_user(clerk_user_id, row["goals_json"]) if row.get("goals_json") else None
+                goals = json.loads(decrypted) if decrypted else []
                 if isinstance(goals, list):
                     return [str(g) for g in goals]
                 if isinstance(goals, dict) and "goals" in goals:
@@ -345,6 +289,7 @@ class MemoryService:
         try:
             import json
             goals_json = json.dumps(goals)
+            enc = encrypt_text_for_user(clerk_user_id, goals_json)
             conn = self._connect()
             cursor = conn.cursor()
             cursor.execute(
@@ -354,7 +299,7 @@ class MemoryService:
                 ON CONFLICT (clerk_user_id)
                 DO UPDATE SET goals_json = EXCLUDED.goals_json, updated_at = CURRENT_TIMESTAMP
                 """,
-                (clerk_user_id, goals_json)
+                (clerk_user_id, enc)
             )
             conn.commit()
             cursor.close()
@@ -369,7 +314,8 @@ class MemoryService:
         try:
             data: Dict[str, Any] = {}
             data["journal_entries"] = self.list_journal_entries(clerk_user_id, limit=10000)
-            data["conversations"] = self.list_conversations(clerk_user_id, limit=10000)
+            # Conversations are not retained by design
+            data["conversations"] = []
             data["goals"] = self.get_user_goals(clerk_user_id)
             # Settings removed; export remains backward compatible without settings
             return data

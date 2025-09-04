@@ -19,7 +19,6 @@ import { Tooltip } from '@/components/ui/tooltip'
 interface DashboardData {
   statistics: {
     total_entries: number
-    total_conversations: number
     entries_this_week: number
     entries_this_month: number
   }

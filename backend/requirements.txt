@@ -12,3 +12,4 @@ python-jose==3.3.0
 supabase==2.8.1
 setuptools>=68
 wheel>=0.41
+cryptography>=41.0.0
