@@ -21,9 +21,14 @@ load_dotenv(base_dir.parent / ".env")
 
 app = FastAPI()
 
+# Configure CORS: allow localhost in dev plus any origins from FRONTEND_ORIGINS (comma-separated)
+frontend_origins_env = os.getenv("FRONTEND_ORIGINS") or os.getenv("FRONTEND_ORIGIN") or ""
+extra_origins = [o.strip() for o in frontend_origins_env.split(",") if o.strip()]
+allow_origins = ["http://localhost:5173", "http://127.0.0.1:5173"] + extra_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

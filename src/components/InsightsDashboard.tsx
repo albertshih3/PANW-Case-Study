@@ -67,10 +67,10 @@ export function InsightsDashboard({ onBack }: InsightsDashboardProps) {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   
-  // Replaced import.meta.env with direct fallbacks.
-  // In a real Vite app, import.meta.env would be used, but this avoids build errors in some environments.
-  const jwtTemplate = 'default'
-  const apiBase = 'http://localhost:8000'
+  // Use env with safe fallbacks: local dev hits localhost; prod can use Vercel rewrite (/api) or full URL
+  const jwtTemplate = (import.meta.env.VITE_CLERK_JWT_TEMPLATE as string | undefined) || 'default'
+  const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)
+    || (typeof window !== 'undefined' && window.location.hostname === 'localhost' ? 'http://localhost:8000' : '/api')
 
   useEffect(() => {
     fetchDashboardData()
