@@ -62,6 +62,14 @@ class MemoryService:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
+            # User goals table: one row per user (JSON text payload)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_goals (
+                    clerk_user_id TEXT PRIMARY KEY,
+                    goals_json TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
             
             conn.commit()
             # Lightweight schema migration for existing DBs where conversations may lack clerk_user_id
@@ -209,7 +217,7 @@ class MemoryService:
             print(f"Error creating journal entry: {e}")
             return None
 
-    def list_journal_entries(self, clerk_user_id: str, limit: int = 20):
+    def list_journal_entries(self, clerk_user_id: str, limit: int = 20, offset: int = 0):
         try:
             conn = self._connect()
             cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -219,9 +227,9 @@ class MemoryService:
                 FROM journal_entries
                 WHERE clerk_user_id = %s
                 ORDER BY created_at DESC
-                LIMIT %s
+                LIMIT %s OFFSET %s
                 """,
-                (clerk_user_id, limit),
+                (clerk_user_id, limit, offset),
             )
             rows = cursor.fetchall()
             cursor.close()
@@ -230,6 +238,55 @@ class MemoryService:
         except Exception as e:
             print(f"Error listing journal entries: {e}")
             return []
+
+    def update_journal_entry(self, clerk_user_id: str, entry_id: int, title: Optional[str] = None, content: Optional[str] = None) -> bool:
+        """Update title and/or content for a journal entry owned by the user."""
+        if title is None and content is None:
+            return False
+        try:
+            conn = self._connect()
+            cursor = conn.cursor()
+            # Build dynamic query
+            fields = []
+            params = []
+            if title is not None:
+                fields.append("title = %s")
+                params.append(title)
+            if content is not None:
+                fields.append("content = %s")
+                params.append(content)
+            fields.append("updated_at = CURRENT_TIMESTAMP")
+            params.extend([clerk_user_id, entry_id])
+            query = f"UPDATE journal_entries SET {', '.join(fields)} WHERE clerk_user_id = %s AND id = %s"
+            cursor.execute(query, tuple(params))
+            updated = cursor.rowcount > 0
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return updated
+        except Exception as e:
+            print(f"Error updating journal entry: {e}")
+            return False
+
+    def delete_journal_entry(self, clerk_user_id: str, entry_id: int) -> bool:
+        try:
+            conn = self._connect()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                DELETE FROM journal_entries
+                WHERE clerk_user_id = %s AND id = %s
+                """,
+                (clerk_user_id, entry_id)
+            )
+            deleted = cursor.rowcount > 0
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return deleted
+        except Exception as e:
+            print(f"Error deleting journal entry: {e}")
+            return False
 
     def list_conversations(self, clerk_user_id: str, limit: int = 20):
         try:
@@ -252,3 +309,70 @@ class MemoryService:
         except Exception as e:
             print(f"Error listing conversations: {e}")
             return []
+
+
+    # --- User goals CRUD ---
+    def get_user_goals(self, clerk_user_id: str) -> List[str]:
+        try:
+            conn = self._connect()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute(
+                """
+                SELECT goals_json FROM user_goals WHERE clerk_user_id = %s
+                """,
+                (clerk_user_id,)
+            )
+            row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            if not row or not row.get("goals_json"):
+                return []
+            try:
+                import json
+                goals = json.loads(row["goals_json"]) or []
+                if isinstance(goals, list):
+                    return [str(g) for g in goals]
+                if isinstance(goals, dict) and "goals" in goals:
+                    return [str(g) for g in goals.get("goals") or []]
+                return []
+            except Exception:
+                return []
+        except Exception as e:
+            print(f"Error fetching user goals: {e}")
+            return []
+
+    def set_user_goals(self, clerk_user_id: str, goals: List[str]) -> bool:
+        try:
+            import json
+            goals_json = json.dumps(goals)
+            conn = self._connect()
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO user_goals (clerk_user_id, goals_json, updated_at)
+                VALUES (%s, %s, CURRENT_TIMESTAMP)
+                ON CONFLICT (clerk_user_id)
+                DO UPDATE SET goals_json = EXCLUDED.goals_json, updated_at = CURRENT_TIMESTAMP
+                """,
+                (clerk_user_id, goals_json)
+            )
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error setting user goals: {e}")
+            return False
+
+    # --- Export helpers ---
+    def export_user_data(self, clerk_user_id: str) -> Dict[str, Any]:
+        try:
+            data: Dict[str, Any] = {}
+            data["journal_entries"] = self.list_journal_entries(clerk_user_id, limit=10000)
+            data["conversations"] = self.list_conversations(clerk_user_id, limit=10000)
+            data["goals"] = self.get_user_goals(clerk_user_id)
+            # Settings removed; export remains backward compatible without settings
+            return data
+        except Exception as e:
+            print(f"Error exporting data: {e}")
+            return {"journal_entries": [], "conversations": [], "goals": []}

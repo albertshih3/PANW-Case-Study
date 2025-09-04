@@ -2,6 +2,30 @@
 
 Private journaling with an empathetic AI companion. Clerk handles auth, FastAPI powers the backend, and PostgreSQL + pgvector store memories and journal entries.
 
+## Phase 1 updates
+
+- User goals (focus areas) stored privately and used to personalize AI prompts
+- Journal edit and delete endpoints with basic UI wiring
+- Weekly/Monthly reflection summary on the Insights panel
+- Export your data (journals, conversations, goals) as JSON
+
+### Key Endpoints
+
+- POST /chat
+- GET /opening-prompt
+- GET /journal, POST /journal, PATCH /journal/{id}, DELETE /journal/{id}
+- GET /conversations
+- GET /insights/trends, GET /insights/dashboard
+- GET /insights/summary?period=week|month
+- GET /user/goals, PUT /user/goals
+- GET /export (add ?download=true to prompt a file download)
+
+### Privacy
+
+- No embeddings are sent to third parties; trend analysis uses lexical/keyword heuristics locally.
+- Conversations and journals are stored in your own Postgres (Supabase) database.
+- You can export all your data at any time from the app (Export Data button) or via GET /export.
+
 ## Setup
 
 Backend (Python 3.9+)

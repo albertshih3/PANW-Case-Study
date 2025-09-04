@@ -184,11 +184,24 @@ class VectorInsightsService:
     NEGATIONS: Set[str] = {"not", "no", "never", "isnt", "arent", "wasnt", "werent", "dont", "doesnt", "didnt", "cant", "couldnt", "wont", "wouldnt"}
     INTENSIFIERS: Dict[str, float] = {"very": 1.5, "extremely": 2.0, "incredibly": 2.0, "so": 1.5, "really": 1.5, "quite": 1.2, "somewhat": 0.8, "slightly": 0.7, "abit": 0.7}
 
+    # Common English stopwords for keyword extraction (kept small and local)
+    STOPWORDS: Set[str] = {
+        'the','a','an','and','or','but','if','then','than','that','this','those','these','to','of','in','on','for','from','by','with','as','at','it','its','be','is','are','was','were','am','i','you','he','she','they','we','me','him','her','them','my','your','our','their','mine','yours','ours','theirs','not','no','so','too','very','just','about','into','over','under','again','once','than','also','been','being','do','does','did','doing','have','has','had','having','can','could','should','would','may','might','must','will','shall','up','down','out','off','more','most','some','such','other','only','own','same','both','each','few','how','why','when','where','what','who','whom','which'
+    }
+
 
     def __init__(self):
         """Initializes the VectorInsightsService."""
         self.database_url = os.getenv("DATABASE_URL", "postgresql://localhost/journaling_app_development")
         print("✓ VectorInsightsService initialized (Fast, Lexical Analysis)")
+        # Simple in-memory cache for per-entry insights to reduce recomputation
+        # Keyed by (entry_id, updated_at_iso)
+        self._insights_cache: Dict[Tuple[int, str], Tuple[float, Dict[str, Any]]] = {}
+        # TTL in seconds (default 1 hour); set INSIGHTS_CACHE_TTL_SECONDS to override
+        try:
+            self._insights_cache_ttl = int(os.getenv("INSIGHTS_CACHE_TTL_SECONDS", "3600"))
+        except Exception:
+            self._insights_cache_ttl = 3600
 
     def _connect(self):
         """
@@ -412,8 +425,9 @@ class VectorInsightsService:
         top_theme_names = {t['theme'] for t in themes[:2]}
 
         for sentence in sentences:
-            found_emotions = {e for e in top_emotion_names if any(k in sentence for k in self.EMOTION_KEYWORDS[e])}
-            found_themes = {t for t in top_theme_names if any(k in sentence for k in self.THEME_KEYWORDS[t])}
+            # Use safe lookups: fallback emotions like 'reflective' or themes like 'personal_reflection'
+            found_emotions = {e for e in top_emotion_names if any(k in sentence for k in self.EMOTION_KEYWORDS.get(e, []))}
+            found_themes = {t for t in top_theme_names if any(k in sentence for k in self.THEME_KEYWORDS.get(t, []))}
             
             for emotion in found_emotions:
                 for theme in found_themes:
@@ -432,7 +446,7 @@ class VectorInsightsService:
         sentences = content.split('.')
         key_sentence = sentences[0].strip() if sentences else ""
         if len(key_sentence.split()) > 4:
-             summary += f"You started by mentioning: \"{key_sentence}.\""
+            summary += f"You started by mentioning: \"{key_sentence}.\""
         
         return summary
 
@@ -440,7 +454,7 @@ class VectorInsightsService:
         """Generates more nuanced insights based on detected patterns."""
         insights = cooccurrences
         
-        if len(similar_entries) > 1:
+        if len(similar_entries) > 1 and themes:
             insights.append(f"The theme of '{themes[0]['theme'].replace('_', ' ')}' seems to be a recurring topic for you, similar to past entries.")
         
         if any(t["theme"] == "personal_growth" for t in themes) and any(e["emotion"] == "proud" for e in emotions):
@@ -458,11 +472,11 @@ class VectorInsightsService:
         if any(word in content.lower() for word in growth_words):
             growth_areas.append("Your writing explicitly shows a commitment to self-improvement and progress.")
         
-        if sentiment_score < 0.35 and any(t['theme'] in ['work', 'relationships'] for t in self._extract_themes_from_similar([], content)):
-             growth_areas.append("Navigating challenges in work or relationships could be a key area for growth.")
+        if sentiment_score < 0.35 and any(t.get('theme') in ['work', 'relationships'] for t in self._extract_themes_from_similar([], content)):
+            growth_areas.append("Navigating challenges in work or relationships could be a key area for growth.")
 
         if not growth_areas:
-             growth_areas.append("Continuing to engage in regular self-reflection is a powerful growth practice in itself.")
+            growth_areas.append("Continuing to engage in regular self-reflection is a powerful growth practice in itself.")
              
         return growth_areas
 
@@ -489,11 +503,77 @@ class VectorInsightsService:
 
         return suggestions if suggestions else ["Continue to use this space to explore your thoughts and feelings. It's a valuable practice."]
 
+    # --- Cached single-entry analysis ---
+    async def analyze_journal_entry_fast_cached(self, content: str, entry_id: int, user_id: str, updated_at: Any) -> Dict[str, Any]:
+        """Wrapper that caches analyze_journal_entry_fast by (entry_id, updated_at_iso)."""
+        try:
+            # Normalize updated_at to iso string for the cache key
+            if hasattr(updated_at, 'isoformat'):
+                updated_iso = updated_at.isoformat()
+            else:
+                updated_iso = str(updated_at)
+            key: Tuple[int, str] = (int(entry_id), updated_iso)
+        except Exception:
+            # Fallback key without updated_at; reduces cache usefulness but stays safe
+            key = (int(entry_id), "")
+
+        # Check cache
+        now_ts = datetime.now().timestamp()
+        cached = self._insights_cache.get(key)
+        if cached:
+            ts, data = cached
+            if now_ts - ts <= self._insights_cache_ttl:
+                return data
+
+        # Compute and store
+        data = await self.analyze_journal_entry_fast(content, entry_id, user_id)
+        self._insights_cache[key] = (now_ts, data)
+        return data
+
     async def analyze_trends_fast(self, entries: List[Dict]) -> Dict[str, Any]:
         """Analyzes trends over a series of entries."""
         if not entries or len(entries) < 3:
             return self._create_empty_trends()
         
+        # --- Fast keyword extraction for P3 keyword cloud ---
+        def fast_extract_keywords(self, entries: List[Dict[str, Any]], top_n: int = 30) -> List[Dict[str, Any]]:
+            """Extracts top keywords across entries using simple token counts and stopword removal.
+
+            Args:
+                entries: List of entries with a 'content' field.
+                top_n: Maximum number of keywords to return.
+
+            Returns:
+                List of { 'word': str, 'count': int, 'weight': float } sorted by count desc.
+            """
+            try:
+                counter = Counter()
+                total_tokens = 0
+
+                for e in entries:
+                    text = (e.get('content') or '')
+                    # Tokenize words
+                    tokens = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())  # min length 3
+                    # Remove stopwords and numeric-like tokens
+                    filtered = [t for t in tokens if t not in self.STOPWORDS and not t.isdigit()]
+                    total_tokens += len(filtered)
+                    counter.update(filtered)
+
+                if not counter:
+                    return []
+
+                # Compute weights (tf-like normalized frequency)
+                most_common = counter.most_common(top_n)
+                max_count = most_common[0][1] if most_common else 1
+                keywords = [
+                    {"word": w, "count": c, "weight": round(c / max_count, 3)}
+                    for w, c in most_common
+                ]
+                return keywords
+            except Exception as e:
+                print(f"Error extracting keywords: {e}")
+                return []
+
         try:
             sentiments = [self._analyze_sentiment_fast(e.get("content", "")) for e in entries]
             theme_counter = Counter()

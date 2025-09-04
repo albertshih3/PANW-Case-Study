@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import { useAuth } from '@clerk/clerk-react'
 import { X, Brain, Heart, TrendingUp, Lightbulb, Target, Sparkles } from 'lucide-react'
 import { useAnimate } from 'motion/react'
@@ -136,14 +137,22 @@ export function InsightsModal({ entryId, entryTitle, entryDate, isOpen, onClose 
         {/* Content */}
         <div className="overflow-y-auto max-h-[calc(90vh-80px)]">
           {isLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="space-y-4 text-center">
-                <div className="flex justify-center space-x-1">
-                  <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" />
-                  <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
-                  <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+            <div className="p-6 space-y-6">
+              <div>
+                <Skeleton className="h-4 w-24 mb-2" />
+                <Skeleton className="h-16 w-full" />
+              </div>
+              <div className="grid md:grid-cols-2 gap-6">
+                <Skeleton className="h-32 w-full" />
+                <Skeleton className="h-32 w-full" />
+              </div>
+              <div>
+                <Skeleton className="h-4 w-28 mb-2" />
+                <div className="flex gap-2">
+                  <Skeleton className="h-8 w-20 rounded-full" />
+                  <Skeleton className="h-8 w-24 rounded-full" />
+                  <Skeleton className="h-8 w-28 rounded-full" />
                 </div>
-                <p className="text-slate-600 dark:text-slate-400">Analyzing your entry...</p>
               </div>
             </div>
           ) : error ? (
