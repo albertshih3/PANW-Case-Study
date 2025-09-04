@@ -1,5 +1,5 @@
 import type React from 'react'
-import { useEffect, useMemo, useState, useRef, memo, useCallback } from 'react'
+import { useEffect, useMemo, useState, useRef, useCallback } from 'react'
 import { SignedIn, SignedOut, useAuth, UserButton, SignInButton, useUser } from '@clerk/clerk-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -7,11 +7,11 @@ import { useAnimate } from 'motion/react'
 import './index.css'
 import KeoIntro from '@/components/KeoIntro'
 import EntryInsightsPanel from '@/components/EntryInsightsPanel'
+import InsightsDashboard from '@/components/InsightsDashboard'
 import { Skeleton } from '@/components/ui/skeleton'
-import { 
-  Calendar, BarChart3, PieChart, ArrowUp, ArrowDown, ArrowRight, 
-  Sparkles, Heart, Leaf, Lightbulb, Flame, Clock, Target, X
-} from 'lucide-react'
+import { Calendar, Sparkles, Target, X, BarChart3 } from 'lucide-react'
+import { Tooltip } from '@/components/ui/tooltip'
+import { GuidedTour, type TourStep } from '@/components/GuidedTour'
 
 interface Message {
   id: string
@@ -20,145 +20,7 @@ interface Message {
   timestamp: Date
 }
 
-interface FadeUpTextProps {
-  text: string
-  onComplete?: () => void
-}
-
-const FadeUpText = memo(({ text, onComplete }: FadeUpTextProps) => {
-  const [scope, animate] = useAnimate()
-  const [isAnimating, setIsAnimating] = useState(false)
-  
-  // Memoize words to prevent recalculation on re-renders
-  const words = useMemo(() => text.split(' '), [text])
-  
-  // Limit animation for very long messages to prevent lag
-  const shouldAnimate = words.length <= 50 // Skip animation for messages over 50 words
-  
-  useEffect(() => {
-    if (!shouldAnimate) {
-      // For long messages, just show immediately without animation
-      if (onComplete) {
-        onComplete()
-      }
-      return
-    }
-    
-    let isMounted = true
-    setIsAnimating(true)
-    
-    const animateWords = async () => {
-      try {
-        if (!scope.current || !isMounted) return
-        
-        // Use refs instead of querySelectorAll for better performance
-        const wordElements = scope.current.children
-        
-        if (wordElements.length === 0) return
-        
-        // Set initial state for all words at once
-        await animate(
-          Array.from(wordElements),
-          { 
-            opacity: 0, 
-            y: 12, 
-            filter: 'blur(2px)',
-            scale: 0.98
-          }, 
-          { duration: 0 }
-        )
-        
-        if (!isMounted) return
-        
-        // Animate words with optimized stagger
-        const maxWords = Math.min(words.length, 30) // Limit to 30 words max for performance
-        const staggerDelay = Math.max(0.03, 0.08 - (maxWords * 0.001)) // Adaptive delay
-        
-        await animate(
-          Array.from(wordElements).slice(0, maxWords),
-          { 
-            opacity: 1, 
-            y: 0, 
-            filter: 'blur(0px)',
-            scale: 1
-          }, 
-          { 
-            duration: 0.3, 
-            delay: (i: number) => i * staggerDelay,
-            ease: [0.25, 0.46, 0.45, 0.94]
-          }
-        )
-        
-        // Fade in remaining words instantly if there are more than 30
-        if (wordElements.length > maxWords && isMounted) {
-          await animate(
-            Array.from(wordElements).slice(maxWords),
-            { 
-              opacity: 1, 
-              y: 0, 
-              filter: 'blur(0px)',
-              scale: 1
-            }, 
-            { duration: 0.1 }
-          )
-        }
-        
-        if (isMounted && onComplete) {
-          onComplete()
-        }
-      } catch (error) {
-        console.warn('Animation error:', error)
-      } finally {
-        if (isMounted) {
-          setIsAnimating(false)
-        }
-      }
-    }
-    
-    // Start animation after a short delay to prevent conflicts
-    const timer = setTimeout(animateWords, 100)
-    
-    return () => {
-      isMounted = false
-      clearTimeout(timer)
-      setIsAnimating(false)
-    }
-  }, [text, animate, scope, onComplete, words, shouldAnimate])
-
-  if (!shouldAnimate) {
-    // Render without animation for long messages
-    return (
-      <div className="whitespace-pre-wrap leading-relaxed">
-        {text}
-      </div>
-    )
-  }
-
-  return (
-    <div 
-      ref={scope} 
-      className="whitespace-pre-wrap leading-relaxed"
-      style={{ minHeight: '1.5em' }} // Prevent layout shift
-    >
-      {words.map((word, index) => (
-        <span
-          key={`${index}-${word.slice(0, 3)}`} // More stable key
-          className="inline-block mr-1"
-          style={{
-            // Provide stable initial styles to prevent layout shifts
-            opacity: isAnimating ? 0 : 1,
-            transform: isAnimating ? 'translateY(12px) scale(0.98)' : 'none',
-            filter: isAnimating ? 'blur(2px)' : 'none'
-          }}
-        >
-          {word}
-        </span>
-      ))}
-    </div>
-  )
-})
-
-FadeUpText.displayName = 'FadeUpText'
+// Removed a corrupted/unused FadeUpText component
 
 function App() {
   const { getToken, userId } = useAuth()
@@ -178,38 +40,12 @@ function App() {
   const [scope, animate] = useAnimate()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [selectedEntry, setSelectedEntry] = useState<{id: number; title: string; date: string} | null>(null)
-  const [dashboardLoading, setDashboardLoading] = useState(false)
-  const [dashboardError, setDashboardError] = useState<string | null>(null)
-  const [dashboardData, setDashboardData] = useState<null | {
-    statistics: {
-      total_entries: number
-      total_conversations: number
-      entries_this_week: number
-      entries_this_month: number
-    },
-    trends: {
-      overall_sentiment_trend: string
-      dominant_themes: Array<{ theme: string; frequency: number }>
-      emotional_patterns: Array<{ emotion: string; frequency: number }>
-      growth_indicators: string[]
-      recommendations: string[]
-      insights_summary: string
-    },
-    recent_insights: Array<{
-      entry_id: number
-      date: string
-      title: string
-      sentiment_score: number
-      dominant_emotion: string
-      main_theme: string
-    }>
-  }>(null)
   const [goals, setGoals] = useState<string[]>([])
   const [newGoal, setNewGoal] = useState('')
-  const [weeklySummary, setWeeklySummary] = useState<null | { summary: any }>(null)
   const [mobileView, setMobileView] = useState<'journal' | 'insights'>('journal')
-  const [streaks, setStreaks] = useState<null | { current_streak: number; best_streak: number; active_days_last_30: number }>(null)
-  const [keywords, setKeywords] = useState<null | Array<{ word: string; count: number; weight: number }>>(null)
+  // Guided tour
+  const [tourOpen, setTourOpen] = useState(false)
+  const [tourSteps, setTourSteps] = useState<TourStep[]>([])
   // Filter: single search bar (title/content)
   const [searchTitle, setSearchTitle] = useState('')
   const apiBase = useMemo(() => import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000', [])
@@ -225,7 +61,6 @@ function App() {
     setInitialLoaded(false)
     setIsJournaling(false)
   setGoals([])
-  setWeeklySummary(null)
     setIsSending(false)
     setIsLoading(false)
     setIsStreaming(false)
@@ -525,12 +360,7 @@ function App() {
       if (res.ok) {
         const item = await res.json()
         setJournal(prev => [item, ...prev])
-        // After saving a new entry, refresh insights dashboard
-        try {
-          await refreshDashboard()
-        } catch (e) {
-          // best-effort; non-blocking
-        }
+  // Insights dashboard will refresh itself when opened
       }
     } catch (e) {
       console.warn('Failed to create journal entry', e)
@@ -614,110 +444,64 @@ function App() {
     userId && initialLoaded && journal.length === 0
   )
 
-  // Reusable loader for insights dashboard
-  const refreshDashboard = useCallback(async () => {
-    if (!userId || !initialLoaded) return
-    setDashboardLoading(true)
-    setDashboardError(null)
-    try {
-      let token: string | null | undefined = null
-      try {
-        token = await getToken?.({ template: jwtTemplate })
-      } catch (e) {
-        console.warn(`Clerk getToken failed for template "${jwtTemplate}".`, e)
-      }
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 60000)
-      const res = await fetch(`${apiBase}/insights/dashboard`, {
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        signal: controller.signal
-      })
-      clearTimeout(timeout)
-      if (res.ok) {
-        const data = await res.json()
-        setDashboardData(data)
-        // Weekly summary (best-effort)
-        try {
-          let token2: string | null | undefined = null
-          try { token2 = await getToken?.({ template: jwtTemplate }) } catch {}
-          const sRes = await fetch(`${apiBase}/insights/summary?period=week`, { headers: { ...(token2 ? { Authorization: `Bearer ${token2}` } : {}) } })
-          if (sRes.ok) {
-            const sData = await sRes.json()
-            setWeeklySummary({ summary: sData.summary })
-          }
-        } catch {}
-        // Engagement streaks (best-effort)
-        try {
-          let token3: string | null | undefined = null
-          try { token3 = await getToken?.({ template: jwtTemplate }) } catch {}
-          const stRes = await fetch(`${apiBase}/engagement/streaks`, { headers: { ...(token3 ? { Authorization: `Bearer ${token3}` } : {}) } })
-          if (stRes.ok) {
-            const stData = await stRes.json()
-            setStreaks(stData)
-          }
-        } catch {}
-        // Keyword cloud (best-effort)
-        try {
-          let token4: string | null | undefined = null
-          try { token4 = await getToken?.({ template: jwtTemplate }) } catch {}
-          const kwRes = await fetch(`${apiBase}/insights/keywords?days=60&top_n=30`, { headers: { ...(token4 ? { Authorization: `Bearer ${token4}` } : {}) } })
-          if (kwRes.ok) {
-            const kwData = await kwRes.json()
-            setKeywords(Array.isArray(kwData.keywords) ? kwData.keywords : [])
-          }
-        } catch {}
-      } else {
-        setDashboardError('Failed to load insights')
-      }
-    } catch (err) {
-      setDashboardError('Failed to load insights')
-    } finally {
-      setDashboardLoading(false)
-    }
-  }, [userId, initialLoaded, getToken, jwtTemplate, apiBase])
+  // Insights dashboard fetches its own data inside the component.
 
-  // Initial load
+  // Start a guided tour with available steps only
+  const startTour = useCallback(() => {
+    const candidates: TourStep[] = [
+      {
+        selector: '[data-tour="brand"]',
+        title: 'Welcome to Loom',
+        content: 'This is your personal journal. Let’s take a quick tour of the main areas.',
+        placement: 'bottom'
+      },
+      {
+        selector: '[data-tour="start-journaling"]',
+        title: 'Start Journaling',
+        content: 'Begin a guided conversation with Keo to reflect on your day.',
+        placement: 'right'
+      },
+      {
+        selector: '[data-tour="search-input"]',
+        title: 'Search Entries',
+        content: 'Quickly find entries by title or content using the search bar.',
+        placement: 'bottom'
+      },
+      {
+        selector: '[data-tour="journal-list"]',
+        title: 'Your Entries',
+        content: 'Browse your recent journal entries and open one to see insights.',
+        placement: 'right'
+      },
+      {
+        selector: '[data-tour="insights-dashboard"]',
+        title: 'Insights',
+        content: 'See patterns, sentiment trends, and highlights extracted from your entries.',
+        placement: 'left'
+      }
+    ]
+    const available = candidates.filter(s => !!document.querySelector(s.selector))
+    if (available.length === 0) return
+    setTourSteps(available)
+    setTourOpen(true)
+  }, [])
+
+  // Auto-run the tour when exactly one entry exists; run only once per user/session
   useEffect(() => {
-    refreshDashboard()
-  }, [refreshDashboard])
-
-  // Export data as JSON file
-  const exportData = useCallback(async () => {
-    try {
-      let token: string | null | undefined = null
-      try { token = await getToken?.({ template: jwtTemplate }) } catch {}
-      const res = await fetch(`${apiBase}/export?download=true`, { headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } })
-      if (!res.ok) return
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `keo-export-${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.json`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
-    } catch {}
-  }, [apiBase, getToken, jwtTemplate])
-
-  const getSentimentInfo = (score: number) => {
-    if (score >= 0.7) return { color: 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300', label: 'Positive' }
-    if (score >= 0.4) return { color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300', label: 'Neutral' }
-    return { color: 'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300', label: 'Negative' }
-  }
-
-  const getTrendIcon = (trend: string) => {
-    switch (trend) {
-      case 'improving':
-        return <ArrowUp className="w-5 h-5 text-green-500" />
-      case 'declining':
-        return <ArrowDown className="w-5 h-5 text-red-500" />
-      case 'stable':
-        return <ArrowRight className="w-5 h-5 text-slate-500" />
-      default:
-        return <BarChart3 className="w-5 h-5 text-slate-500" />
+    if (journal.length === 1 && !tourOpen) {
+      const ran = localStorage.getItem('loom_tour_ran')
+      if (!ran) {
+        // Defer to allow layout to settle
+        const id = window.setTimeout(() => {
+          startTour()
+          localStorage.setItem('loom_tour_ran', '1')
+        }, 300)
+        return () => window.clearTimeout(id)
+      }
     }
-  }
+  }, [journal.length, tourOpen, startTour])
+
+  // Removed unused dashboard helpers from App
 
   // Clean preview for journal cards: drop AI lines and boilerplate
   const getEntryPreview = (content: string) => {
@@ -900,7 +684,6 @@ function App() {
             await startJournaling()
             // After starting with AI prompt, send user's message
             setTimeout(() => sendMessage(text), 1000)
-            createJournalEntry(text, null)
           }}
         />
       )}
@@ -1051,7 +834,7 @@ function App() {
           <div className="flex min-h-screen w-full flex-col bg-gradient-to-br from-slate-50 via-white to-indigo-50/30 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900">
             <header className="sticky top-0 z-10 w-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-slate-200/50 dark:border-slate-700/50 shadow-sm">
               <div className="flex h-16 items-center justify-between px-4 sm:px-6 lg:px-8">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3" data-tour="brand">
                   <div className="flex items-center justify-center w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl shadow-lg">
                     <span className="text-white text-lg font-bold">L</span>
                   </div>
@@ -1065,8 +848,8 @@ function App() {
                     <Calendar className="w-4 h-4 mr-2" />
                     Journal
                   </Button>
-                  <Button variant="outline" size="sm" onClick={exportData} className="border-slate-200 dark:border-slate-700">
-                    Export Data
+                  <Button variant="outline" size="sm" onClick={startTour} className="border-slate-200 dark:border-slate-700">
+                    Guide
                   </Button>
                   <UserButton />
                 </nav>
@@ -1074,6 +857,8 @@ function App() {
             </header>
 
             <main className="flex-1 w-full px-4 sm:px-6 lg:px-8 py-8">
+              {/* Guided Tour overlay */}
+              <GuidedTour open={tourOpen} steps={tourSteps} onClose={() => setTourOpen(false)} />
               {/* Modern Welcome Section */}
               {journal.length > 0 && (
                 <div className="mb-8 text-center">
@@ -1089,22 +874,54 @@ function App() {
               {/* Mobile toggle with modern styling */}
               <div className="mb-6 md:hidden">
                 <div className="bg-slate-100 dark:bg-slate-800 rounded-2xl p-1 flex">
-                  <Button 
-                    variant={mobileView === 'journal' ? 'default' : 'ghost'} 
-                    size="sm" 
-                    onClick={() => setMobileView('journal')}
-                    className={`flex-1 rounded-xl ${mobileView === 'journal' ? 'bg-white dark:bg-slate-700 shadow-sm' : 'hover:bg-slate-200 dark:hover:bg-slate-700'}`}
-                  >
-                    📝 Journal
-                  </Button>
-                  <Button 
-                    variant={mobileView === 'insights' ? 'default' : 'ghost'} 
-                    size="sm" 
-                    onClick={() => setMobileView('insights')}
-                    className={`flex-1 rounded-xl ${mobileView === 'insights' ? 'bg-white dark:bg-slate-700 shadow-sm' : 'hover:bg-slate-200 dark:hover:bg-slate-700'}`}
-                  >
-                    📊 Insights
-                  </Button>
+                  {journal.length === 1 ? (
+                    <Tooltip 
+                      content="View and manage your journal entries"
+                      position="bottom"
+                    >
+                      <Button 
+                        variant={mobileView === 'journal' ? 'default' : 'ghost'} 
+                        size="sm" 
+                        onClick={() => setMobileView('journal')}
+                        className={`flex-1 rounded-xl ${mobileView === 'journal' ? 'bg-white dark:bg-slate-700 shadow-sm' : 'hover:bg-slate-200 dark:hover:bg-slate-700'}`}
+                      >
+                        📝 Journal
+                      </Button>
+                    </Tooltip>
+                  ) : (
+                    <Button 
+                      variant={mobileView === 'journal' ? 'default' : 'ghost'} 
+                      size="sm" 
+                      onClick={() => setMobileView('journal')}
+                      className={`flex-1 rounded-xl ${mobileView === 'journal' ? 'bg-white dark:bg-slate-700 shadow-sm' : 'hover:bg-slate-200 dark:hover:bg-slate-700'}`}
+                    >
+                      📝 Journal
+                    </Button>
+                  )}
+                  {journal.length === 1 ? (
+                    <Tooltip 
+                      content="View emotional insights and patterns from your entries"
+                      position="bottom"
+                    >
+                      <Button 
+                        variant={mobileView === 'insights' ? 'default' : 'ghost'} 
+                        size="sm" 
+                        onClick={() => setMobileView('insights')}
+                        className={`flex-1 rounded-xl ${mobileView === 'insights' ? 'bg-white dark:bg-slate-700 shadow-sm' : 'hover:bg-slate-200 dark:hover:bg-slate-700'}`}
+                      >
+                        📊 Insights
+                      </Button>
+                    </Tooltip>
+                  ) : (
+                    <Button 
+                      variant={mobileView === 'insights' ? 'default' : 'ghost'} 
+                      size="sm" 
+                      onClick={() => setMobileView('insights')}
+                      className={`flex-1 rounded-xl ${mobileView === 'insights' ? 'bg-white dark:bg-slate-700 shadow-sm' : 'hover:bg-slate-200 dark:hover:bg-slate-700'}`}
+                    >
+                      📊 Insights
+                    </Button>
+                  )}
                 </div>
               </div>
 
@@ -1116,7 +933,16 @@ function App() {
                     <div className="mb-6 bg-gradient-to-br from-white via-indigo-50/30 to-white dark:from-slate-800 dark:via-slate-800/50 dark:to-slate-800 rounded-2xl p-5 border border-indigo-100 dark:border-slate-700 shadow-sm">
                       <div className="flex items-center gap-2 mb-3">
                         <Target className="w-4 h-4 text-indigo-500" />
-                        <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">Focus Areas</h3>
+                        {journal.length === 1 ? (
+                          <Tooltip 
+                            content="Set topics you want to focus on - Keo will provide personalized insights based on these areas"
+                            position="right"
+                          >
+                            <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 cursor-help">Focus Areas</h3>
+                          </Tooltip>
+                        ) : (
+                          <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">Focus Areas</h3>
+                        )}
                       </div>
                       <div className="flex flex-wrap gap-2 mb-3">
                         {goals.map((g, idx) => (
@@ -1178,14 +1004,30 @@ function App() {
                       </div>
                     </div>
                     {/* Enhanced Start Journaling Button */}
-                    <div className="mb-6">
-                      <Button 
-                        onClick={startJournaling}
-                        className="w-full h-12 bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-600 hover:from-indigo-600 hover:via-purple-600 hover:to-indigo-700 text-white rounded-2xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-[1.02] font-medium"
-                      >
-                        <Sparkles className="w-4 h-4 mr-2" />
-                        Start Journaling
-                      </Button>
+                    <div className="mb-6" data-tour="start-journaling">
+                      {journal.length === 1 ? (
+                        <Tooltip 
+                          content="Start a new conversational journal session with Keo"
+                          position="bottom"
+                          fullWidth
+                        >
+                          <Button 
+                            onClick={startJournaling}
+                            className="w-full h-12 bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-600 hover:from-indigo-600 hover:via-purple-600 hover:to-indigo-700 text-white rounded-2xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-[1.02] font-medium"
+                          >
+                            <Sparkles className="w-4 h-4 mr-2" />
+                            Start Journaling
+                          </Button>
+                        </Tooltip>
+                      ) : (
+                        <Button 
+                          onClick={startJournaling}
+                          className="w-full h-12 bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-600 hover:from-indigo-600 hover:via-purple-600 hover:to-indigo-700 text-white rounded-2xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-[1.02] font-medium"
+                        >
+                          <Sparkles className="w-4 h-4 mr-2" />
+                          Start Journaling
+                        </Button>
+                      )}
                       {journal.length === 0 && (
                         <p className="text-xs text-center text-slate-500 dark:text-slate-400 mt-2">
                           Begin your journey of self-reflection
@@ -1196,12 +1038,29 @@ function App() {
                     {/* Enhanced Search */}
                     <div className="mb-4 bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-4 border border-slate-200/50 dark:border-slate-700/50 shadow-sm">
                       <div className="relative">
-                        <input
-                          value={searchTitle}
-                          onChange={(e) => setSearchTitle(e.target.value)}
-                          placeholder="Search your entries..."
-                          className="w-full text-sm px-4 py-3 pl-10 rounded-xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-700/80 focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                        />
+                        {journal.length === 1 ? (
+                          <Tooltip 
+                            content="Search through your journal entries by title or content"
+                            position="top"
+                            fullWidth
+                          >
+                            <input
+                              data-tour="search-input"
+                              value={searchTitle}
+                              onChange={(e) => setSearchTitle(e.target.value)}
+                              placeholder="Search your entries..."
+                              className="w-full text-sm px-4 py-3 pl-10 rounded-xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-700/80 focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                            />
+                          </Tooltip>
+                        ) : (
+                          <input
+                            data-tour="search-input"
+                            value={searchTitle}
+                            onChange={(e) => setSearchTitle(e.target.value)}
+                            placeholder="Search your entries..."
+                            className="w-full text-sm px-4 py-3 pl-10 rounded-xl border border-slate-200 dark:border-slate-600 bg-white/80 dark:bg-slate-700/80 focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                          />
+                        )}
                         <div className="absolute left-3 top-1/2 transform -translate-y-1/2">
                           <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -1239,7 +1098,7 @@ function App() {
                         </div>
                       </div>
                     ) : filteredJournal.length > 0 ? (
-                      <div className="space-y-4 max-h-[calc(100vh-400px)] overflow-y-auto pr-1">
+                      <div className="space-y-4 max-h-[calc(100vh-400px)] overflow-y-auto pr-1" data-tour="journal-list">
                         {filteredJournal.map((j, index) => {
                           // Batch load summaries for visible entries (first 5)
                           if (index < 5 && !entrySummaries[j.id] && !entrySummaryLoading[j.id] && !batchLoadingEntries.has(j.id)) {
@@ -1251,11 +1110,17 @@ function App() {
                           }
                           
                           return (
-                            <div
-                              key={j.id}
-                              className="group relative bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-5 border border-slate-200/50 dark:border-slate-700/50 shadow-sm hover:shadow-lg hover:bg-white dark:hover:bg-slate-800 cursor-pointer transition-all duration-300 transform hover:scale-[1.02] hover:border-indigo-200 dark:hover:border-indigo-700"
-                              onClick={() => setSelectedEntry({ id: j.id, title: j.title || 'Untitled Entry', date: j.created_at })}
-                            >
+                            journal.length === 1 ? (
+                              <Tooltip 
+                                key={j.id}
+                                content="Click to view detailed insights for this journal entry"
+                                position="right"
+                                delay={500}
+                              >
+                                <div
+                                  className="group relative bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-5 border border-slate-200/50 dark:border-slate-700/50 shadow-sm hover:shadow-lg hover:bg-white dark:hover:bg-slate-800 cursor-pointer transition-all duration-300 transform hover:scale-[1.02] hover:border-indigo-200 dark:hover:border-indigo-700"
+                                  onClick={() => setSelectedEntry({ id: j.id, title: j.title || 'Untitled Entry', date: j.created_at })}
+                                >
                               {/* Date Badge */}
                               <div className="flex items-center justify-between mb-3">
                                 <div className="flex items-center gap-2">
@@ -1318,7 +1183,78 @@ function App() {
                               <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <div className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse"></div>
                               </div>
-                            </div>
+                                </div>
+                              </Tooltip>
+                            ) : (
+                              <div
+                                key={j.id}
+                                className="group relative bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm rounded-2xl p-5 border border-slate-200/50 dark:border-slate-700/50 shadow-sm hover:shadow-lg hover:bg-white dark:hover:bg-slate-800 cursor-pointer transition-all duration-300 transform hover:scale-[1.02] hover:border-indigo-200 dark:hover:border-indigo-700"
+                                onClick={() => setSelectedEntry({ id: j.id, title: j.title || 'Untitled Entry', date: j.created_at })}
+                              >
+                              {/* Date Badge */}
+                              <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-2 h-2 bg-gradient-to-r from-indigo-400 to-purple-500 rounded-full"></div>
+                                  <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                                    {new Date(j.created_at).toLocaleDateString('en-US', { 
+                                      month: 'short', 
+                                      day: 'numeric',
+                                      hour: '2-digit',
+                                      minute: '2-digit'
+                                    })}
+                                  </span>
+                                </div>
+                                {/* Action Buttons */}
+                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200">
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    className="h-7 px-2 text-xs hover:bg-indigo-50 dark:hover:bg-indigo-900/30 text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400"
+                                    onClick={async (e) => { 
+                                      e.stopPropagation() 
+                                      const v = window.prompt('Rename entry', j.title || '') ?? '' 
+                                      if (v.trim()) await updateJournalEntry(j.id, { title: v.trim() })
+                                    }}
+                                  >
+                                    Rename
+                                  </Button>
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    className="h-7 px-2 text-xs hover:bg-red-50 dark:hover:bg-red-900/30 text-slate-500 hover:text-red-600 dark:hover:text-red-400"
+                                    onClick={async (e) => { 
+                                      e.stopPropagation() 
+                                      if (window.confirm('Delete this entry?')) await deleteJournalEntry(j.id)
+                                    }}
+                                  >
+                                    Delete
+                                  </Button>
+                                </div>
+                              </div>
+                              
+                              {/* Title */}
+                              <h3 className="text-base font-semibold mb-3 text-slate-800 dark:text-slate-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors line-clamp-1">
+                                {j.title || 'Untitled Entry'}
+                              </h3>
+                              
+                              {/* Content Preview */}
+                              <div className="text-sm text-slate-600 dark:text-slate-400 line-clamp-2 leading-relaxed">
+                                {entrySummaryLoading[j.id] ? (
+                                  <div className="space-y-2">
+                                    <Skeleton className="h-4 w-full" />
+                                    <Skeleton className="h-4 w-2/3" />
+                                  </div>
+                                ) : (
+                                  entrySummaries[j.id] || getEntryPreview(j.content)
+                                )}
+                              </div>
+                              
+                              {/* Hover Indicator */}
+                              <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <div className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse"></div>
+                              </div>
+                              </div>
+                            )
                           )
                         })}
                         {journal.length < journalTotal && (
@@ -1355,7 +1291,7 @@ function App() {
                   </div>
                 </section>
 
-                {/* Right: Insights Full Dashboard or Entry Insights */}
+                {/* Right: Entry Insights or Full Insights Dashboard */}
                 <section className={`${mobileView === 'journal' ? 'hidden' : 'block'} md:block`}>
                   {selectedEntry ? (
                     <EntryInsightsPanel
@@ -1364,224 +1300,31 @@ function App() {
                       entryDate={selectedEntry.date}
                       onBack={() => setSelectedEntry(null)}
                     />
-                  ) : dashboardLoading ? (
-                    <div className="space-y-6">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                        <Skeleton className="h-24 w-full" />
-                        <Skeleton className="h-24 w-full" />
-                        <Skeleton className="h-24 w-full" />
-                        <Skeleton className="h-24 w-full" />
-                      </div>
-                      <Skeleton className="h-28 w-full" />
-                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <Skeleton className="h-64 w-full lg:col-span-2" />
-                        <Skeleton className="h-64 w-full" />
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <Skeleton className="h-40 w-full" />
-                        <Skeleton className="h-40 w-full" />
-                      </div>
-                    </div>
-                  ) : dashboardError ? (
-                    <div className="text-sm text-slate-500">Insights unavailable right now.</div>
-                  ) : dashboardData ? (
-                    <div className="space-y-8">
-                      {weeklySummary?.summary && (
-                        <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
-                          <h2 className="text-xl font-semibold mb-2 flex items-center gap-2">
-                            <Sparkles className="w-5 h-5 text-amber-500" />
-                            This Week’s Reflection
-                          </h2>
-                          <p className="text-slate-700 dark:text-slate-300 text-sm">
-                            {weeklySummary.summary.highlights?.[0]}
-                          </p>
-                          <div className="mt-3 text-xs text-slate-600 dark:text-slate-400">
-                            Themes: {weeklySummary.summary.top_themes} · Emotions: {weeklySummary.summary.top_emotions}
-                          </div>
-                        </div>
-                      )}
-                      {/* Stat cards */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                        <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-2xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
-                          <div className="flex items-center gap-4">
-                            <Calendar className="w-7 h-7 text-indigo-500" />
-                            <div>
-                              <p className="text-sm text-slate-600 dark:text-slate-400">Total Entries</p>
-                              <p className="text-2xl font-bold">{dashboardData.statistics.total_entries}</p>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-2xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
-                          <div className="flex items-center gap-4">
-                            <BarChart3 className="w-7 h-7 text-green-500" />
-                            <div>
-                              <p className="text-sm text-slate-600 dark:text-slate-400">This Week</p>
-                              <p className="text-2xl font-bold">{dashboardData.statistics.entries_this_week}</p>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-2xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
-                          <div className="flex items-center gap-4">
-                            <PieChart className="w-7 h-7 text-purple-500" />
-                            <div>
-                              <p className="text-sm text-slate-600 dark:text-slate-400">This Month</p>
-                              <p className="text-2xl font-bold">{dashboardData.statistics.entries_this_month}</p>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-2xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm">
-                          <div className="flex items-center gap-4">
-                            {getTrendIcon(dashboardData.trends.overall_sentiment_trend)}
-                            <div>
-                              <p className="text-sm text-slate-600 dark:text-slate-400">Sentiment Trend</p>
-                              <p className="text-xl font-bold capitalize">{dashboardData.trends.overall_sentiment_trend}</p>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-
-                      {/* Streaks */}
-                      {streaks && (
-                        <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
-                          <h2 className="text-xl font-semibold mb-2 flex items-center gap-2">
-                            <Flame className="w-5 h-5 text-orange-500" /> Journaling Streaks
-                          </h2>
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                            <div className="p-4 bg-slate-50 dark:bg-slate-900/50 rounded-xl border dark:border-slate-700">
-                              <div className="text-xs text-slate-500 mb-1">Current</div>
-                              <div className="text-2xl font-bold">{streaks.current_streak} days</div>
-                            </div>
-                            <div className="p-4 bg-slate-50 dark:bg-slate-900/50 rounded-xl border dark:border-slate-700">
-                              <div className="text-xs text-slate-500 mb-1">Best</div>
-                              <div className="text-2xl font-bold">{streaks.best_streak} days</div>
-                            </div>
-                            <div className="p-4 bg-slate-50 dark:bg-slate-900/50 rounded-xl border dark:border-slate-700">
-                              <div className="text-xs text-slate-500 mb-1">Active last 30</div>
-                              <div className="text-2xl font-bold">{streaks.active_days_last_30} days</div>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Insights narrative */}
-                      {dashboardData.trends.insights_summary && (
-                        <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
-                          <h2 className="text-xl font-semibold mb-2 flex items-center gap-2">
-                            <Sparkles className="w-5 h-5 text-amber-500" />
-                            Your Journey's Narrative
-                          </h2>
-                          <p className="text-slate-700 dark:text-slate-300">{dashboardData.trends.insights_summary}</p>
-                        </div>
-                      )}
-
-                      {/* Recent insights + side panels */}
-                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                        <div className="lg:col-span-2 space-y-8">
-                          <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
-                            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-                              <Heart className="w-5 h-5 text-red-500" />
-                              Recent Emotional Snapshots
-                            </h2>
-                            <div className="space-y-3">
-                              {dashboardData.recent_insights.slice(0, 3).map((insight) => (
-                                <div key={insight.entry_id} className="p-3 bg-slate-50/80 dark:bg-slate-900/50 rounded-lg border dark:border-slate-700">
-                                  <div className="flex items-center justify-between mb-2">
-                                    <span className="text-sm font-medium truncate pr-4">{insight.title}</span>
-                                    <span className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${getSentimentInfo(insight.sentiment_score).color}`}>
-                                      {insight.dominant_emotion}
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
-                                    <span>{new Date(insight.date).toLocaleDateString()}</span>
-                                    <span className="capitalize bg-slate-200 dark:bg-slate-700 px-2 py-0.5 rounded">{insight.main_theme.replace('_', ' ')}</span>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="space-y-8">
-                          {/* Keyword cloud */}
-                          {keywords && keywords.length > 0 && (
-                            <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
-                              <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-                                <Clock className="w-5 h-5 text-indigo-500" /> Frequent Keywords
-                              </h2>
-                              <div className="flex flex-wrap gap-2">
-                                {keywords.slice(0, 30).map((k) => {
-                                  // Map weight [0,1] to text sizes
-                                  const w = Math.max(0.4, Math.min(1, k.weight))
-                                  const size = w >= 0.9 ? 'text-2xl' : w >= 0.75 ? 'text-xl' : w >= 0.6 ? 'text-lg' : w >= 0.5 ? 'text-base' : 'text-sm'
-                                  const opacity = w
-                                  return (
-                                    <span key={k.word} className={`${size} capitalize`} style={{ opacity }}>
-                                      {k.word}
-                                    </span>
-                                  )
-                                })}
+                  ) : (
+                    <div data-tour="insights-dashboard">
+                      {journal.length >= 3 ? (
+                        <InsightsDashboard />
+                      ) : (
+                        <div className="w-full p-6">
+                          <div className="mx-auto max-w-xl text-center">
+                            <div className="relative mx-auto mb-6 h-40 w-40">
+                              <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-indigo-500/20 via-purple-500/20 to-cyan-500/20 blur-2xl" />
+                              <div className="absolute inset-4 rounded-3xl bg-white/40 dark:bg-slate-800/40 backdrop-blur-md border border-slate-200/60 dark:border-slate-700/60 shadow-sm flex items-center justify-center">
+                                <BarChart3 className="w-12 h-12 text-indigo-500" />
                               </div>
                             </div>
-                          )}
-                          <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
-                            <h2 className="text-xl font-semibold mb-4">Dominant Themes</h2>
-                            <div className="space-y-3">
-                              {dashboardData.trends.dominant_themes.slice(0, 5).map((theme) => (
-                                <div key={theme.theme}>
-                                  <div className="flex items-center justify-between text-sm mb-1">
-                                    <span className="capitalize">{theme.theme.replace('_', ' ')}</span>
-                                    <span className="text-slate-500 dark:text-slate-400">{Math.round(theme.frequency * 100)}%</span>
-                                  </div>
-                                  <div className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                                    <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${theme.frequency * 100}%` }}/>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                          <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
-                            <h2 className="text-xl font-semibold mb-4">Frequent Emotions</h2>
-                            <div className="flex flex-wrap gap-2">
-                              {dashboardData.trends.emotional_patterns.map((pattern) => (
-                                <div key={pattern.emotion} className="py-1 px-3 bg-slate-100 dark:bg-slate-700 rounded-full">
-                                  <span className="text-sm capitalize">{pattern.emotion}</span>
-                                </div>
-                              ))}
+                            <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100 mb-2">Insights unlock after 3 entries</h3>
+                            <p className="text-slate-600 dark:text-slate-400 mb-4">Write a few reflections to help Keo discover patterns, themes, and trends tailored to you.</p>
+                            <div className="flex items-center justify-center gap-2 text-slate-500 dark:text-slate-400 text-sm">
+                              <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-slate-300" /> 1</span>
+                              <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-slate-300" /> 2</span>
+                              <span className="flex items-center gap-1 font-medium text-indigo-600 dark:text-indigo-400"><span className="h-2 w-2 rounded-full bg-indigo-500" /> 3</span>
                             </div>
                           </div>
                         </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
-                          <h2 className="text-xl font-semibold mb-4 flex items-center gap-3">
-                            <Leaf className="w-6 h-6 text-green-500" /> Growth Areas
-                          </h2>
-                          <ul className="space-y-3">
-                            {dashboardData.trends.growth_indicators.slice(0, 3).map((indicator, idx) => (
-                              <li key={idx} className="flex items-start gap-3 text-slate-600 dark:text-slate-400">
-                                <div className="w-1.5 h-1.5 bg-green-500 rounded-full mt-2 shrink-0" />
-                                <span>{indicator}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                        <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
-                          <h2 className="text-xl font-semibold mb-4 flex items-center gap-3">
-                            <Lightbulb className="w-6 h-6 text-blue-500" /> Suggestions For You
-                          </h2>
-                          <ul className="space-y-3">
-                            {dashboardData.trends.recommendations.slice(0, 3).map((rec, idx) => (
-                              <li key={idx} className="flex items-start gap-3 text-slate-600 dark:text-slate-400">
-                                <div className="w-1.5 h-1.5 bg-blue-500 rounded-full mt-2 shrink-0" />
-                                <span>{rec}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      </div>
+                      )}
                     </div>
-                  ) : null}
+                  )}
                 </section>
               </div>
             </main>

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { 
-  ArrowLeft, 
   Brain, 
   Heart, 
   Calendar, 
@@ -14,6 +13,7 @@ import {
   Sparkles,
   Leaf
 } from 'lucide-react'
+import { Tooltip } from '@/components/ui/tooltip'
 
 // This interface should match the data structure returned by your FastAPI backend
 interface DashboardData {
@@ -47,9 +47,7 @@ interface DashboardData {
   }>
 }
 
-interface InsightsDashboardProps {
-  onBack: () => void
-}
+interface InsightsDashboardProps {}
 
 // Add type definition for Clerk on the window object to avoid TypeScript errors.
 declare global {
@@ -62,7 +60,7 @@ declare global {
   }
 }
 
-export function InsightsDashboard({ onBack }: InsightsDashboardProps) {
+export function InsightsDashboard({}: InsightsDashboardProps) {
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -119,6 +117,18 @@ export function InsightsDashboard({ onBack }: InsightsDashboardProps) {
     }
   }
 
+  // Normalize labels: replace underscores/dashes, trim, and Title Case words
+  const formatLabel = (value: string | null | undefined) => {
+    if (!value) return ''
+    return value
+      .toString()
+      .replace(/[_-]+/g, ' ')
+      .trim()
+      .split(/\s+/)
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ')
+  }
+
   const getSentimentInfo = (score: number) => {
     if (score >= 0.7) return { color: 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300', label: 'Positive' }
     if (score >= 0.4) return { color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300', label: 'Neutral' }
@@ -137,6 +147,34 @@ export function InsightsDashboard({ onBack }: InsightsDashboardProps) {
         return <BarChart3 className="w-5 h-5 text-slate-500" />
     }
   }
+
+  // Build a friendly, highlighted list with tooltips to source entries
+  const buildHighlightedList = (items: string[], type: 'theme' | 'emotion') => {
+    const parts: React.ReactNode[] = []
+    items.forEach((raw, idx) => {
+      const item = formatLabel(raw)
+      const matches = (dashboardData?.recent_insights || []).filter(ri => {
+        if (type === 'theme') return formatLabel(ri.main_theme).toLowerCase() === item.toLowerCase()
+        return formatLabel(ri.dominant_emotion).toLowerCase() === item.toLowerCase()
+      })
+      const tooltip = matches.length
+        ? `Seen in: ${matches.slice(0, 3).map(m => `${new Date(m.date).toLocaleDateString()} – ${m.title || 'Untitled'}`).join('; ')}`
+        : `No recent entries tagged with ${item}`
+
+      const node = (
+        <Tooltip key={`${type}-${raw}-${idx}`} content={tooltip} position="top">
+          <span className="underline decoration-dotted decoration-indigo-400 underline-offset-4 rounded px-0.5 hover:bg-indigo-50 dark:hover:bg-indigo-900/30">
+            {item}
+          </span>
+        </Tooltip>
+      )
+
+      parts.push(node)
+      if (idx < items.length - 2) parts.push(', ')
+      else if (idx === items.length - 2) parts.push(', and ')
+    })
+    return parts
+  }
   
   const StatCard = ({ icon, title, value }: { icon: React.ReactNode, title: string, value: string | number }) => (
     <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm rounded-2xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm transition-all hover:shadow-lg hover:border-indigo-300 dark:hover:border-indigo-600">
@@ -152,14 +190,22 @@ export function InsightsDashboard({ onBack }: InsightsDashboardProps) {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-cyan-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 flex items-center justify-center">
-        <div className="space-y-4 text-center">
-          <div className="flex justify-center space-x-2">
-            <div className="w-3 h-3 bg-indigo-500 rounded-full animate-bounce" />
-            <div className="w-3 h-3 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
-            <div className="w-3 h-3 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+      <div className="w-full min-h-[200px] flex items-center justify-center">
+        <style>{`
+          @keyframes indeterminateBar {
+            0% { left: -40%; width: 40%; }
+            50% { left: 20%; width: 60%; }
+            100% { left: 100%; width: 40%; }
+          }
+        `}</style>
+        <div className="w-full max-w-md px-6">
+          <div className="mb-3 text-center text-slate-600 dark:text-slate-400">Building your insights…</div>
+          <div className="relative h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700 shadow-inner">
+            <div
+              className="absolute top-0 h-full rounded-full bg-gradient-to-r from-indigo-400 via-indigo-600 to-purple-600"
+              style={{ animation: 'indeterminateBar 1.2s ease-in-out infinite' }}
+            />
           </div>
-          <p className="text-slate-600 dark:text-slate-400">Analyzing your emotional journey...</p>
         </div>
       </div>
     )
@@ -167,9 +213,8 @@ export function InsightsDashboard({ onBack }: InsightsDashboardProps) {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-red-50 via-white to-orange-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 p-6">
-        <Button onClick={onBack} variant="ghost" className="mb-6"><ArrowLeft className="w-4 h-4 mr-2" />Back</Button>
-        <div className="text-center py-12">
+      <div className="w-full p-6">
+        <div className="text-center py-8">
           <p className="text-lg text-red-600 dark:text-red-400 mb-4">{error}</p>
           <Button onClick={fetchDashboardData}>Try Again</Button>
         </div>
@@ -177,14 +222,33 @@ export function InsightsDashboard({ onBack }: InsightsDashboardProps) {
     )
   }
 
+  // If fewer than 3 total entries, show a modern empty-state graphic instead of insights
+  if (dashboardData && dashboardData.statistics.total_entries < 3) {
+    return (
+      <div className="w-full p-6">
+        <div className="mx-auto max-w-xl text-center">
+          <div className="relative mx-auto mb-6 h-40 w-40">
+            <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-indigo-500/20 via-purple-500/20 to-cyan-500/20 blur-2xl" />
+            <div className="absolute inset-4 rounded-3xl bg-white/40 dark:bg-slate-800/40 backdrop-blur-md border border-slate-200/60 dark:border-slate-700/60 shadow-sm flex items-center justify-center">
+              <BarChart3 className="w-12 h-12 text-indigo-500" />
+            </div>
+          </div>
+          <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100 mb-2">Insights unlock after 3 entries</h3>
+          <p className="text-slate-600 dark:text-slate-400 mb-4">Write a few reflections to help Keo discover patterns, themes, and trends tailored to you.</p>
+          <div className="flex items-center justify-center gap-2 text-slate-500 dark:text-slate-400 text-sm">
+            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-slate-300" /> 1</span>
+            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-slate-300" /> 2</span>
+            <span className="flex items-center gap-1 font-medium text-indigo-600 dark:text-indigo-400"><span className="h-2 w-2 rounded-full bg-indigo-500" /> 3</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-cyan-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900">
+    <div className="">
       <div className="p-4 md:p-6 max-w-7xl mx-auto">
-        <header className="mb-8">
-          <Button onClick={onBack} variant="ghost" className="mb-4 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700">
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Journal
-          </Button>
+  <header className="mb-8">
           <div className="flex items-center gap-4">
             <div className="p-3 bg-indigo-100 dark:bg-indigo-900/50 rounded-full">
               <Brain className="w-8 h-8 text-indigo-500 dark:text-indigo-400" />
@@ -207,8 +271,8 @@ export function InsightsDashboard({ onBack }: InsightsDashboardProps) {
                       {getTrendIcon(dashboardData.trends.overall_sentiment_trend)}
                       <div>
                           <p className="text-sm text-slate-600 dark:text-slate-400">Sentiment Trend</p>
-                          <p className="text-xl font-bold text-slate-900 dark:text-slate-100 capitalize">
-                              {dashboardData.trends.overall_sentiment_trend}
+                          <p className="text-xl font-bold text-slate-900 dark:text-slate-100">
+                              {formatLabel(dashboardData.trends.overall_sentiment_trend)}
                           </p>
                       </div>
                   </div>
@@ -224,7 +288,18 @@ export function InsightsDashboard({ onBack }: InsightsDashboardProps) {
                           Your Journey's Narrative
                       </h2>
                       <p className="text-slate-700 dark:text-slate-300 leading-relaxed">
-                          {dashboardData.trends.insights_summary}
+                        {`Your recent entries show a ${formatLabel(dashboardData.trends.overall_sentiment_trend).toLowerCase()} emotional trend.`}{' '}
+                        The most common themes are{' '}
+                        {buildHighlightedList(
+                          dashboardData.trends.dominant_themes.slice(0, 3).map(t => t.theme),
+                          'theme'
+                        )}
+                        , with emotions like{' '}
+                        {buildHighlightedList(
+                          dashboardData.trends.emotional_patterns.slice(0, 3).map(e => e.emotion),
+                          'emotion'
+                        )}{' '}
+                        appearing often.
                       </p>
                   </div>
 
@@ -240,12 +315,12 @@ export function InsightsDashboard({ onBack }: InsightsDashboardProps) {
                           <div className="flex items-center justify-between mb-2">
                             <span className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate pr-4">{insight.title}</span>
                             <span className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${getSentimentInfo(insight.sentiment_score).color}`}>
-                              {insight.dominant_emotion}
+                              {formatLabel(insight.dominant_emotion)}
                             </span>
                           </div>
                           <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
                             <span>{new Date(insight.date).toLocaleDateString()}</span>
-                            <span className="capitalize bg-slate-200 dark:bg-slate-700 px-2 py-0.5 rounded">{insight.main_theme.replace('_', ' ')}</span>
+                            <span className="bg-slate-200 dark:bg-slate-700 px-2 py-0.5 rounded">{formatLabel(insight.main_theme)}</span>
                           </div>
                         </div>
                       ))}
@@ -261,7 +336,7 @@ export function InsightsDashboard({ onBack }: InsightsDashboardProps) {
                     {dashboardData.trends.dominant_themes.slice(0, 5).map((theme) => (
                       <div key={theme.theme}>
                         <div className="flex items-center justify-between text-sm mb-1">
-                          <span className="text-slate-700 dark:text-slate-300 capitalize">{theme.theme.replace('_', ' ')}</span>
+                          <span className="text-slate-700 dark:text-slate-300">{formatLabel(theme.theme)}</span>
                           <span className="text-slate-500 dark:text-slate-400">{Math.round(theme.frequency * 100)}%</span>
                         </div>
                         <div className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
@@ -278,7 +353,7 @@ export function InsightsDashboard({ onBack }: InsightsDashboardProps) {
                     <div className="flex flex-wrap gap-2">
                         {dashboardData.trends.emotional_patterns.map((pattern) => (
                             <div key={pattern.emotion} className="py-1 px-3 bg-slate-100 dark:bg-slate-700 rounded-full">
-                                <span className="text-sm text-slate-700 dark:text-slate-300 capitalize">{pattern.emotion}</span>
+                                <span className="text-sm text-slate-700 dark:text-slate-300">{formatLabel(pattern.emotion)}</span>
                             </div>
                         ))}
                     </div>

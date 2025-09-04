@@ -72,8 +72,8 @@ export function KeoIntro({ name, onSubmit }: KeoIntroProps) {
               </span>
             </h1>
             <p data-description className="mt-3 text-base sm:text-lg text-slate-600 dark:text-slate-300" style={{ opacity: 0, transform: 'translateY(8px)' }}>
-              My name is Keo. I’m your reflective companion—here to listen, ask thoughtful questions,
-              and gently help you turn what you’re feeling into clarity.
+              I'm Keo, your AI journaling companion. I'll help you explore your thoughts through natural conversation, 
+              analyze patterns in your emotions, and provide personalized insights to support your mental wellness journey.
             </p>
           </div>
 
@@ -85,7 +85,7 @@ export function KeoIntro({ name, onSubmit }: KeoIntroProps) {
               <Textarea
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder="Share a few thoughts to begin your first journal entry…"
+                placeholder="Share what's on your mind and I'll guide you through a thoughtful conversation..."
                 rows={3}
                 className="w-full max-w-xl text-base"
               />
