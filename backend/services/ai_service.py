@@ -205,8 +205,8 @@ Based on the user's recent journal entries, craft a warm, empathetic opening mes
 4.  Keeps it concise (1-2 sentences).
 
 Examples:
-- "I remember you mentioned feeling overwhelmed at work. I was thinking of you. How are things looking today?"
-- "It sounds like you've been processing a lot lately. What's on your heart right now?"
+- "I remember you mentioned feeling overwhelmed at work. How are things looking today?"
+- "It sounds like you've been processing a lot lately. What's on your mind right now?"
 
 Respond only with the opening message itself, nothing else."""
 
