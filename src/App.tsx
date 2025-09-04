@@ -548,9 +548,9 @@ function App() {
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-50 via-white to-cyan-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900" />
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-100/30 via-transparent to-cyan-100/30 dark:from-indigo-900/20 dark:to-cyan-900/20" />
             <div className="absolute inset-0 backdrop-blur-[120px]" />
-            <div className="relative min-h-screen overflow-y-auto text-slate-900 dark:text-slate-100">
-              <div className="mx-auto w-full max-w-5xl px-6 py-8">
-                <div className="space-y-8 min-h-screen flex flex-col">
+            <div className="relative min-h-screen text-slate-900 dark:text-slate-100">
+              <div className="mx-auto w-full max-w-5xl px-6 py-8 min-h-screen overflow-y-auto">
+                <div className="space-y-8 flex flex-col min-h-full">
                   
                   {/* AI Prompt Display */}
                   <div ref={scope} className="flex-shrink-0">
@@ -595,7 +595,7 @@ function App() {
                   )}
 
                   {/* Large Text Area for Journal Entry - flex-grow to take available space */}
-                  <div className="flex-grow flex flex-col space-y-6">
+                  <div className="flex flex-col space-y-6 flex-1 min-h-0">
                     {!isLoading && (
                       <div className="text-center flex-shrink-0">
                         <label className="block text-sm text-slate-500 dark:text-slate-400 mb-3">
@@ -604,17 +604,15 @@ function App() {
                       </div>
                     )}
                     
-                    <div className="w-full flex-grow">
+                    <div className="w-full flex-1 min-h-0">
                       <Textarea
                         ref={journalTextareaRef}
                         value={journalText}
                         onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setJournalText(e.target.value)}
                         onKeyDown={handleKeyDown}
                         placeholder="What's on your mind? Let your thoughts flow freely here. You can use **markdown** formatting like *italics* and **bold**."
-                        rows={15}
                         disabled={isLoading || isSending}
-                        className="w-full text-base bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border border-white/20 dark:border-slate-700/50 rounded-2xl p-6 shadow-lg resize-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
-                        style={{ minHeight: '400px' }}
+                        className="w-full h-full min-h-[300px] text-base bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border border-white/20 dark:border-slate-700/50 rounded-2xl p-6 shadow-lg resize-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                       />
                     </div>
                   </div>
