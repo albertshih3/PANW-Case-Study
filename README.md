@@ -47,13 +47,6 @@ Private journaling with an empathetic AI companion. Clerk handles auth, FastAPI 
 - Proactive check-ins and digest emails for weekly/monthly reflections
 - Advanced moderation/guardrails (e.g., Llama Guard, custom policies)
 
-## Phase 1 updates
-
-- User goals (focus areas) stored privately and used to personalize AI prompts
-- Journal edit and delete endpoints with basic UI wiring
-- Weekly/Monthly reflection summary on the Insights panel
-- Export your data (journals, conversations, goals) as JSON
-
 ### Key Endpoints
 
 - POST /chat
@@ -86,16 +79,3 @@ Frontend (Node 18+)
 - Install and run:
   - npm i
   - npm run dev
-
-## Clerk configuration
-
-Create a JWT template in your Clerk dashboard and name it to match `VITE_CLERK_JWT_TEMPLATE` (default is `default`).
-Grant appropriate claims (at minimum `sub`, and optionally `email`, etc.).
-In the backend environment, set one of:
-
-- CLERK_ISSUER=https://YOUR_SUBDOMAIN.clerk.accounts.dev
-  - Backend will derive JWKS from `${ISSUER}/.well-known/jwks.json`
-- or CLERK_JWKS_URL=https://YOUR_SUBDOMAIN.clerk.accounts.dev/.well-known/jwks.json
-
-Common error: `No JWT template exists with name: default`
-- Fix by creating a template named `default` in Clerk, or set `VITE_CLERK_JWT_TEMPLATE` to your existing template name.
