@@ -171,7 +171,7 @@ export default function EntryInsightsPanel({ entryId, entryTitle, entryDate, onB
       
       // Extract user messages from journal entry content
       const journalContent = entry.content || ''
-      const journalUserMessages = journalContent.split('\n\n').filter(msg => msg.trim())
+      const journalUserMessages = journalContent.split('\n\n').filter((msg: string) => msg.trim())
       
       if (journalUserMessages.length === 0) {
         // If no content in journal, show empty state
