@@ -196,7 +196,10 @@ function App() {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ message: journalText }),
+        body: JSON.stringify({ 
+          message: journalText,
+          instructions: "Provide a short, focused response (one paragraph maximum). Ask only ONE specific question or prompt to help deepen their reflection. Keep it concise and encouraging."
+        }),
       })
 
       if (!response.ok) {
@@ -545,12 +548,12 @@ function App() {
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-50 via-white to-cyan-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900" />
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-100/30 via-transparent to-cyan-100/30 dark:from-indigo-900/20 dark:to-cyan-900/20" />
             <div className="absolute inset-0 backdrop-blur-[120px]" />
-            <div className="relative flex min-h-screen items-center justify-center text-slate-900 dark:text-slate-100">
-              <div className="mx-auto w-full max-w-5xl px-6">
-                <div className="space-y-8">
+            <div className="relative min-h-screen overflow-y-auto text-slate-900 dark:text-slate-100">
+              <div className="mx-auto w-full max-w-5xl px-6 py-8">
+                <div className="space-y-8 min-h-screen flex flex-col">
                   
                   {/* AI Prompt Display */}
-                  <div ref={scope}>
+                  <div ref={scope} className="flex-shrink-0">
                     {currentPrompt && !isLoading && (
                       <div className="text-center space-y-4">
                         <p className="text-sm uppercase tracking-widest text-slate-500 dark:text-slate-400">Keo suggests</p>
@@ -569,7 +572,7 @@ function App() {
 
                   {/* Loading State */}
                   {isLoading && (
-                    <div className="text-center space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                    <div className="text-center space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 flex-shrink-0">
                       <p className="text-sm uppercase tracking-widest text-slate-500 dark:text-slate-400">Keo is thinking</p>
                       <div className="w-full max-w-xl mx-auto">
                         <div className="h-1 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
@@ -591,17 +594,17 @@ function App() {
                     </div>
                   )}
 
-                  {/* Large Text Area for Journal Entry */}
-                  <div className="space-y-6">
+                  {/* Large Text Area for Journal Entry - flex-grow to take available space */}
+                  <div className="flex-grow flex flex-col space-y-6">
                     {!isLoading && (
-                      <div className="text-center">
+                      <div className="text-center flex-shrink-0">
                         <label className="block text-sm text-slate-500 dark:text-slate-400 mb-3">
                           {journalText.trim() ? "Continue writing your thoughts..." : "Start writing your journal entry..."}
                         </label>
                       </div>
                     )}
                     
-                    <div className="w-full">
+                    <div className="w-full flex-grow">
                       <Textarea
                         ref={journalTextareaRef}
                         value={journalText}
@@ -614,8 +617,10 @@ function App() {
                         style={{ minHeight: '400px' }}
                       />
                     </div>
+                  </div>
                     
-                    {/* Action Buttons */}
+                  {/* Action Buttons - Always visible at bottom */}
+                  <div className="flex-shrink-0 space-y-4">
                     <div className="flex items-center justify-center gap-4">
                       <Button 
                         onClick={handleContinueWriting} 
